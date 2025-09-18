@@ -1,0 +1,226 @@
+:root {
+  color-scheme: light;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f8f8f8;
+  color: #111;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e2e2;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #c7c7c7;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.toolbar button:hover {
+  border-color: #999;
+}
+
+.hidden-input {
+  display: none;
+}
+
+.app-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.canvas-container {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+  background: #f0f0f0;
+  padding: 32px;
+}
+
+.canvas-svg {
+  background: transparent;
+}
+
+.add-handle rect {
+  cursor: pointer;
+}
+
+.add-handle rect:hover {
+  fill: #0041c4;
+  stroke: #0041c4;
+}
+
+.node-text {
+  font-size: 16px;
+  fill: #111;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.node-count {
+  font-weight: 600;
+}
+
+.exclusion-text {
+  font-size: 16px;
+  fill: #111;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.inspector {
+  width: 320px;
+  min-width: 320px;
+  flex-shrink: 0;
+  padding: 24px;
+  background: #ffffff;
+  border-left: 1px solid #e2e2e2;
+  overflow-y: auto;
+}
+
+.inspector.empty {
+  color: #666666;
+}
+
+.inspector h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.field textarea,
+.field input {
+  font-size: 14px;
+  font-family: 'Inter', system-ui, sans-serif;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #cfcfcf;
+  resize: vertical;
+}
+
+.field input[readonly] {
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.field textarea:focus,
+.field input:focus {
+  outline: 2px solid #0057ff44;
+  border-color: #0057ff;
+}
+
+.hint {
+  color: #666666;
+  font-size: 12px;
+}
+
+.inspector-summary {
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.delta-badge text {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.reason-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.reason-row .field {
+  margin-bottom: 0;
+}
+
+.field.compact {
+  margin-bottom: 0;
+}
+
+.reason-title {
+  flex: 1 1 auto;
+  min-width: 140px;
+}
+
+.reason-count {
+  flex: 0 0 120px;
+}
+
+.reason-count input {
+  width: 100%;
+}
+
+.remove-reason {
+  border: none;
+  background: transparent;
+  color: #d92c2c;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.remove-reason:hover {
+  background: #f6d6d6;
+}
+
+.add-reason {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #c7c7c7;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.add-reason:hover {
+  border-color: #999;
+}
