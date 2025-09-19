@@ -9,7 +9,8 @@ import {
   IntervalId,
   NodeId,
 } from './types';
-import { BOX_GAP_Y, BOX_HEIGHT } from './constants';
+import { BOX_GAP_Y } from './constants';
+import { computeNodeHeight } from './layout';
 
 const DEFAULT_TEXT = ['New step'];
 
@@ -67,29 +68,26 @@ function createDefaultExclusion(): ExclusionBox {
 
 function ensureOtherReason(exclusion: ExclusionBox): void {
   const userReasons = exclusion.reasons.filter((reason) => reason.kind === 'user');
-  if (userReasons.length === 0) {
-    exclusion.reasons = [];
-    return;
-  }
-
   const existingAuto = exclusion.reasons.find((reason) => reason.kind === 'auto');
+  const createdAuto: ExclusionReason = existingAuto ?? {
+    id: nanoid(),
+    label: 'Other',
+    n: null,
+    kind: 'auto',
+  };
   const sumUser = userReasons.reduce((acc, reason) => acc + (reason.n ?? 0), 0);
+  const remainder = exclusion.total != null ? exclusion.total - sumUser : null;
 
-  let autoReason: ExclusionReason;
-  if (existingAuto) {
-    autoReason = existingAuto;
-  } else {
-    autoReason = {
-      id: nanoid(),
-      label: 'Other',
-      n: null,
-      kind: 'auto',
-    };
+  createdAuto.n = remainder;
+
+  exclusion.reasons = [...userReasons];
+  if (createdAuto && createdAuto.n != null) {
+    exclusion.reasons.push(createdAuto);
+  } else if (existingAuto && existingAuto.label !== 'Other') {
+    // Preserve custom label even when the remainder is zero.
+    existingAuto.n = remainder;
+    exclusion.reasons.push(existingAuto);
   }
-
-  autoReason.n = exclusion.total != null ? exclusion.total - sumUser : null;
-
-  exclusion.reasons = [...userReasons, autoReason];
 }
 
 function getReason(graph: GraphState, intervalId: IntervalId, reasonId: string): ExclusionReason {
@@ -299,10 +297,12 @@ export function relayoutLinear(graph: GraphState): GraphState {
     return cloned;
   }
   const ordered = orderNodes(cloned);
-  ordered.forEach((node, index) => {
-    node.position.y = index * (BOX_HEIGHT + BOX_GAP_Y);
+  let cursorY = 0;
+  ordered.forEach((node) => {
+    node.position.y = cursorY;
     node.position.x = 0;
     node.column = 0;
+    cursorY += computeNodeHeight(node) + BOX_GAP_Y;
   });
   return cloned;
 }

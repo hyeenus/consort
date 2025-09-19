@@ -2,8 +2,14 @@ import React, { useMemo } from 'react';
 import classNames from 'classnames';
 import { GraphState, AppSettings, Interval } from '../model/types';
 import { orderNodes } from '../model/graph';
-import { BOX_HEIGHT, BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
-import { formatCount } from '../model/numbers';
+import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
+import {
+  computeExclusionHeight,
+  computeNodeHeight,
+  getExclusionDisplayLines,
+  getNodeDisplayLines,
+  LINE_HEIGHT,
+} from '../model/layout';
 
 interface CanvasProps {
   graph: GraphState;
@@ -13,12 +19,13 @@ interface CanvasProps {
 }
 
 const CANVAS_MARGIN = 120;
-const EXCLUSION_HEIGHT = 120;
-
 export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCreateBelow }) => {
   const nodesOrdered = useMemo(() => orderNodes(graph), [graph]);
 
-  const height = nodesOrdered.length * (BOX_HEIGHT + 64) + CANVAS_MARGIN;
+  const lastNode = nodesOrdered[nodesOrdered.length - 1];
+  const height = lastNode
+    ? CANVAS_MARGIN + lastNode.position.y + computeNodeHeight(lastNode)
+    : CANVAS_MARGIN;
   const width = 960;
   const centerX = width / 3;
 
@@ -48,8 +55,9 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
           }
           const parentY = CANVAS_MARGIN / 2 + parent.position.y;
           const childY = CANVAS_MARGIN / 2 + child.position.y;
+          const parentHeight = computeNodeHeight(parent);
           const x = centerX;
-          const top = parentY + BOX_HEIGHT;
+          const top = parentY + parentHeight;
           const bottom = childY;
           const midY = top + (bottom - top) / 2;
           const isSelected = graph.selectedId === interval.id;
@@ -67,7 +75,7 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
                 markerEnd={shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined}
               />
               {renderDeltaBadge(interval, x - 80, midY)}
-              {renderExclusion(interval, x, midY, stroke, isSelected, onSelect)}
+              {renderExclusion(interval, x, midY, stroke, isSelected, onSelect, settings)}
             </g>
           );
         })}
@@ -76,22 +84,22 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
           const x = centerX - BOX_WIDTH / 2;
           const y = CANVAS_MARGIN / 2 + node.position.y;
           const isSelected = graph.selectedId === node.id;
-          const nodeLines = [...(node.textLines.length ? node.textLines : [''])];
-          nodeLines.push(formatCount(node.n));
+          const displayLines = getNodeDisplayLines(node);
+          const boxHeight = computeNodeHeight(node);
           return (
             <g key={node.id} onClick={() => onSelect(node.id)} className={classNames('canvas-node', { selected: isSelected })}>
               <rect
                 x={x}
                 y={y}
                 width={BOX_WIDTH}
-                height={BOX_HEIGHT}
+                height={boxHeight}
                 rx={8}
                 ry={8}
                 fill="#fff"
                 stroke={isSelected ? '#0057ff' : '#111'}
                 strokeWidth={isSelected ? 3 : 2}
               />
-              {renderCenteredLines(nodeLines, centerX, y, BOX_HEIGHT, {
+              {renderCenteredLines(displayLines, centerX, y, boxHeight, {
                 textClass: 'node-text',
                 countClass: 'node-count',
               })}
@@ -104,14 +112,14 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
               >
                 <rect
                   x={centerX - 16}
-                  y={y + BOX_HEIGHT + 12}
+                  y={y + boxHeight + 12}
                   width={32}
                   height={32}
                   rx={8}
                   fill="#0057ff"
                   stroke="#0057ff"
                 />
-                <text x={centerX} y={y + BOX_HEIGHT + 32} textAnchor="middle" fontSize={20} fill="#ffffff">
+                <text x={centerX} y={y + boxHeight + 32} textAnchor="middle" fontSize={20} fill="#ffffff">
                   +
                 </text>
               </g>
@@ -148,18 +156,21 @@ function renderExclusion(
   midY: number,
   stroke: string,
   isSelected: boolean,
-  onSelect: (id: string | undefined) => void
+  onSelect: (id: string | undefined) => void,
+  settings: AppSettings
 ) {
   const boxX = axisX + EXCLUSION_OFFSET_X;
-  const boxY = midY - EXCLUSION_HEIGHT / 2;
   const exclusion = interval.exclusion ?? {
     label: 'Excluded',
     total: null,
     reasons: [],
   };
+  const exclusionHeight = computeExclusionHeight(exclusion);
+  const boxY = midY - exclusionHeight / 2;
   const highlightStroke = isSelected ? '#0057ff' : '#111';
 
-  const lines = buildExclusionLines(exclusion);
+  const lines = getExclusionDisplayLines(exclusion);
+  const arrowMarker = shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined;
 
   return (
     <g
@@ -169,19 +180,27 @@ function renderExclusion(
         onSelect(interval.id);
       }}
     >
-      <line x1={axisX} y1={midY} x2={boxX} y2={midY} stroke={stroke} strokeWidth={isSelected ? 3 : 2} />
+      <line
+        x1={axisX}
+        y1={midY}
+        x2={boxX}
+        y2={midY}
+        stroke={stroke}
+        strokeWidth={isSelected ? 3 : 2}
+        markerEnd={arrowMarker}
+      />
       <rect
         x={boxX}
         y={boxY}
         width={EXCLUSION_WIDTH}
-        height={EXCLUSION_HEIGHT}
+        height={exclusionHeight}
         rx={8}
         ry={8}
         fill="#fff"
         stroke={highlightStroke}
         strokeWidth={isSelected ? 3 : 2}
       />
-      {renderCenteredLines(lines, boxX + EXCLUSION_WIDTH / 2, boxY, EXCLUSION_HEIGHT, {
+      {renderCenteredLines(lines, boxX + EXCLUSION_WIDTH / 2, boxY, exclusionHeight, {
         textClass: 'exclusion-text',
         countClass: 'node-count',
       })}
@@ -197,8 +216,7 @@ function renderCenteredLines(
   classes: { textClass: string; countClass?: string }
 ) {
   const sanitized = lines.length ? lines : [''];
-  const lineHeight = 20;
-  const totalHeight = lineHeight * sanitized.length;
+  const totalHeight = LINE_HEIGHT * sanitized.length;
   const startY = topY + containerHeight / 2 - totalHeight / 2 + 6;
 
   return (
@@ -209,7 +227,7 @@ function renderCenteredLines(
           <tspan
             key={index}
             x={centerX}
-            dy={index === 0 ? 0 : lineHeight}
+            dy={index === 0 ? 0 : LINE_HEIGHT}
             className={isCountLine ? classes.countClass : undefined}
           >
             {line}
@@ -218,28 +236,4 @@ function renderCenteredLines(
       })}
     </text>
   );
-}
-
-function buildExclusionLines(exclusion: Interval['exclusion']) {
-  if (!exclusion) {
-    return ['Excluded', 'N = —'];
-  }
-  const lines: string[] = [];
-  lines.push(exclusion.label || 'Excluded');
-  if (!exclusion.reasons || exclusion.reasons.length === 0) {
-    lines.push(formatCount(exclusion.total ?? null));
-    return lines;
-  }
-  exclusion.reasons.forEach((reason) => {
-    const reasonLabel = reason.label ? reason.label : '—';
-    lines.push(`${reasonLabel}: ${formatReasonValue(reason.n ?? null)}`);
-  });
-  return lines;
-}
-
-function formatReasonValue(value: number | null): string {
-  if (value == null) {
-    return '—';
-  }
-  return formatCount(value).replace('N = ', '');
 }

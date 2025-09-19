@@ -46,6 +46,7 @@ interface AppStore {
     updateExclusionReasonCount: (intervalId: IntervalId, reasonId: string, value: number | null) => void;
     removeExclusionReason: (intervalId: IntervalId, reasonId: string) => void;
     toggleAutoCalc: () => void;
+    toggleArrowsGlobal: () => void;
     toggleArrow: (intervalId: IntervalId) => void;
     selectById: (id: string | undefined) => void;
     navigateSelection: (direction: 'up' | 'down' | 'left' | 'right') => void;
@@ -186,6 +187,17 @@ export const useAppStore = create<AppStore>()(
                 ...state,
                 settings: nextSettings,
                 graph: updatedGraph,
+                history: pushHistory(state.history, prev),
+              };
+            });
+          },
+          toggleArrowsGlobal: () => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => {
+              const nextSettings: AppSettings = { ...state.settings, arrowsGlobal: !state.settings.arrowsGlobal };
+              return {
+                ...state,
+                settings: nextSettings,
                 history: pushHistory(state.history, prev),
               };
             });

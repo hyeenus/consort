@@ -17,6 +17,7 @@ export const App: React.FC = () => {
     navigateSelection,
     selectById,
     toggleAutoCalc,
+    toggleArrowsGlobal,
     undo,
     redo,
     toggleArrow,
@@ -123,6 +124,7 @@ export const App: React.FC = () => {
           }
         }}
         onToggleAutoCalc={toggleAutoCalc}
+        onToggleArrows={toggleArrowsGlobal}
         onUndo={undo}
         onRedo={redo}
         onExportSvg={() => {
