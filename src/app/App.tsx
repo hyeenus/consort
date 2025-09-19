@@ -20,7 +20,6 @@ export const App: React.FC = () => {
     toggleArrowsGlobal,
     undo,
     redo,
-    toggleArrow,
     createExportSnapshot,
     importSnapshot,
     reset,
@@ -98,18 +97,11 @@ export const App: React.FC = () => {
         return;
       }
 
-      if (key.toLowerCase() === 'a') {
-        if (selectionKind === 'interval' && selectedId) {
-          event.preventDefault();
-          toggleArrow(selectedId);
-        }
-        return;
-      }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [graph, navigateSelection, selectById, toggleArrow, redo, undo, addNodeBelow]);
+  }, [graph, navigateSelection, selectById, redo, undo, addNodeBelow]);
 
   return (
     <div className="app-shell">
