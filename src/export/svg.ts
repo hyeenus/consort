@@ -56,7 +56,9 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const exclusionStartY = boxY + EXCLUSION_HEIGHT / 2 - exclusionTotalHeight / 2 + 6;
 
     svgParts.push(
-      `<line x1="${axisX}" y1="${midY}" x2="${boxX}" y2="${midY}" stroke="#111111" stroke-width="2" />`,
+      `<line x1="${axisX}" y1="${midY}" x2="${boxX}" y2="${midY}" stroke="#111111" stroke-width="2"${
+        showArrow ? ' marker-end="url(#arrowhead)"' : ''
+      } />`,
       `<rect x="${boxX}" y="${boxY}" width="${EXCLUSION_WIDTH}" height="${EXCLUSION_HEIGHT}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
       `<text x="${boxX + EXCLUSION_WIDTH / 2}" y="${exclusionStartY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`
     );

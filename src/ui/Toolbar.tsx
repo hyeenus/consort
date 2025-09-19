@@ -6,6 +6,7 @@ interface ToolbarProps {
   settings: AppSettings;
   onAddStep: () => void;
   onToggleAutoCalc: () => void;
+  onToggleArrows: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onExportSvg: () => void;
@@ -19,6 +20,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   settings,
   onAddStep,
   onToggleAutoCalc,
+  onToggleArrows,
   onUndo,
   onRedo,
   onExportSvg,
@@ -41,6 +43,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
         <button type="button" onClick={onToggleAutoCalc}>
           {settings.autoCalc ? 'Unlock Numbers' : 'Lock Numbers'}
+        </button>
+        <button type="button" onClick={onToggleArrows}>
+          {settings.arrowsGlobal ? 'Show Lines' : 'Show Arrows'}
         </button>
         <button type="button" onClick={onReset}>
           Reset

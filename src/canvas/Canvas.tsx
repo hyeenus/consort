@@ -67,7 +67,7 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
                 markerEnd={shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined}
               />
               {renderDeltaBadge(interval, x - 80, midY)}
-              {renderExclusion(interval, x, midY, stroke, isSelected, onSelect)}
+              {renderExclusion(interval, x, midY, stroke, isSelected, onSelect, settings)}
             </g>
           );
         })}
@@ -148,7 +148,8 @@ function renderExclusion(
   midY: number,
   stroke: string,
   isSelected: boolean,
-  onSelect: (id: string | undefined) => void
+  onSelect: (id: string | undefined) => void,
+  settings: AppSettings
 ) {
   const boxX = axisX + EXCLUSION_OFFSET_X;
   const boxY = midY - EXCLUSION_HEIGHT / 2;
@@ -160,6 +161,7 @@ function renderExclusion(
   const highlightStroke = isSelected ? '#0057ff' : '#111';
 
   const lines = buildExclusionLines(exclusion);
+  const arrowMarker = shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined;
 
   return (
     <g
@@ -169,7 +171,15 @@ function renderExclusion(
         onSelect(interval.id);
       }}
     >
-      <line x1={axisX} y1={midY} x2={boxX} y2={midY} stroke={stroke} strokeWidth={isSelected ? 3 : 2} />
+      <line
+        x1={axisX}
+        y1={midY}
+        x2={boxX}
+        y2={midY}
+        stroke={stroke}
+        strokeWidth={isSelected ? 3 : 2}
+        markerEnd={arrowMarker}
+      />
       <rect
         x={boxX}
         y={boxY}
