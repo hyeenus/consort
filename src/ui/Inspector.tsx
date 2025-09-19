@@ -37,6 +37,7 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
   const [exclusionLabel, setExclusionLabel] = useState('');
   const [exclusionCount, setExclusionCount] = useState('');
   const [reasonDrafts, setReasonDrafts] = useState<ReasonDraft[]>([]);
+  const [isEditingReasons, setIsEditingReasons] = useState(false);
 
   const {
     updateLabel: updateReasonDraftLabel,
@@ -50,6 +51,9 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
 
   useEffect(() => {
     if (selectionKind === 'node' && selectedId) {
+      if (isEditingReasons) {
+        setIsEditingReasons(false);
+      }
       const node = nodes[selectedId];
       if (!node) {
         return;
@@ -82,18 +86,23 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
           kind: reason.kind,
         }));
 
-      setReasonDrafts((current) => (areDraftsEqual(current, nextDrafts) ? current : nextDrafts));
+      if (!isEditingReasons) {
+        setReasonDrafts((current) => (areDraftsEqual(current, nextDrafts) ? current : nextDrafts));
+      }
       return;
     }
 
     if (selectionKind === undefined) {
+      if (isEditingReasons) {
+        setIsEditingReasons(false);
+      }
       setTextValue('');
       setCountValue('');
       setExclusionLabel('');
       setExclusionCount('');
       setReasonDrafts([]);
     }
-  }, [selectionKind, selectedId, nodes, intervals]);
+  }, [selectionKind, selectedId, nodes, intervals, isEditingReasons]);
 
   useEffect(() => {
     if (focusSignal > 0 && firstFieldRef.current) {
@@ -193,7 +202,11 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
                 type="text"
                 value={reason.label}
                 onChange={(event) => updateReasonDraftLabel(reason.id, event.target.value)}
-                onBlur={() => updateExclusionReasonLabel(selectedId, reason.id, getReasonDraftLabel(reason.id))}
+                onFocus={() => setIsEditingReasons(true)}
+                onBlur={() => {
+                  setIsEditingReasons(false);
+                  updateExclusionReasonLabel(selectedId, reason.id, getReasonDraftLabel(reason.id));
+                }}
               />
             </div>
             <div className="field compact reason-count">
@@ -205,11 +218,13 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
                 onChange={(event) => updateReasonDraftCount(reason.id, event.target.value)}
                 onBlur={() => {
                   const value = getReasonDraftCount(reason.id);
+                  setIsEditingReasons(false);
                   if (reason.kind === 'auto') {
                     return;
                   }
                   updateExclusionReasonCount(selectedId, reason.id, parseCount(value));
                 }}
+                onFocus={() => setIsEditingReasons(true)}
                 readOnly={reason.kind === 'auto'}
               />
             </div>

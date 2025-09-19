@@ -1,14 +1,22 @@
-import { AppSettings, ExclusionBox, GraphState } from '../model/types';
+import { AppSettings, GraphState } from '../model/types';
 import { orderNodes } from '../model/graph';
-import { BOX_HEIGHT, BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
-import { formatCount } from '../model/numbers';
+import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
+import {
+  computeExclusionHeight,
+  computeNodeHeight,
+  getExclusionDisplayLines,
+  getNodeDisplayLines,
+  LINE_HEIGHT,
+} from '../model/layout';
 
 const CANVAS_MARGIN = 120;
-const EXCLUSION_HEIGHT = 120;
 
 export function generateSvg(graph: GraphState, settings: AppSettings): string {
   const nodesOrdered = orderNodes(graph);
-  const height = nodesOrdered.length * (BOX_HEIGHT + 64) + CANVAS_MARGIN;
+  const lastNode = nodesOrdered[nodesOrdered.length - 1];
+  const height = lastNode
+    ? CANVAS_MARGIN + lastNode.position.y + computeNodeHeight(lastNode)
+    : CANVAS_MARGIN;
   const width = 960;
   const centerX = width / 3;
 
@@ -35,8 +43,9 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     }
     const parentY = CANVAS_MARGIN / 2 + parent.position.y;
     const childY = CANVAS_MARGIN / 2 + child.position.y;
+    const parentHeight = computeNodeHeight(parent);
     const axisX = centerX;
-    const top = parentY + BOX_HEIGHT;
+    const top = parentY + parentHeight;
     const bottom = childY;
     const midY = top + (bottom - top) / 2;
     const showArrow = settings.arrowsGlobal && interval.arrow;
@@ -48,22 +57,22 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     );
 
     const boxX = axisX + EXCLUSION_OFFSET_X;
-    const boxY = midY - EXCLUSION_HEIGHT / 2;
     const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
-    const exclusionLines = buildExclusionLines(exclusion);
-    const exclusionLineHeight = 20;
-    const exclusionTotalHeight = exclusionLineHeight * exclusionLines.length;
-    const exclusionStartY = boxY + EXCLUSION_HEIGHT / 2 - exclusionTotalHeight / 2 + 6;
+    const exclusionHeight = computeExclusionHeight(exclusion);
+    const exclusionLines = getExclusionDisplayLines(exclusion);
+    const exclusionTotalHeight = LINE_HEIGHT * exclusionLines.length;
+    const boxY = midY - exclusionHeight / 2;
+    const exclusionStartY = boxY + exclusionHeight / 2 - exclusionTotalHeight / 2 + 6;
 
     svgParts.push(
       `<line x1="${axisX}" y1="${midY}" x2="${boxX}" y2="${midY}" stroke="#111111" stroke-width="2"${
         showArrow ? ' marker-end="url(#arrowhead)"' : ''
       } />`,
-      `<rect x="${boxX}" y="${boxY}" width="${EXCLUSION_WIDTH}" height="${EXCLUSION_HEIGHT}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
+      `<rect x="${boxX}" y="${boxY}" width="${EXCLUSION_WIDTH}" height="${exclusionHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
       `<text x="${boxX + EXCLUSION_WIDTH / 2}" y="${exclusionStartY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`
     );
     exclusionLines.forEach((line, index) => {
-      const dy = index === 0 ? 0 : exclusionLineHeight;
+      const dy = index === 0 ? 0 : LINE_HEIGHT;
       const isCountLine = line.startsWith('N =');
       svgParts.push(
         `<tspan x="${boxX + EXCLUSION_WIDTH / 2}" dy="${dy}"${isCountLine ? ' font-weight="600"' : ''}>${escapeText(
@@ -77,16 +86,16 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
   nodesOrdered.forEach((node) => {
     const x = centerX - BOX_WIDTH / 2;
     const y = CANVAS_MARGIN / 2 + node.position.y;
+    const nodeHeight = computeNodeHeight(node);
     svgParts.push(
-      `<rect x="${x}" y="${y}" width="${BOX_WIDTH}" height="${BOX_HEIGHT}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`
+      `<rect x="${x}" y="${y}" width="${BOX_WIDTH}" height="${nodeHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`
     );
-    const nodeLines = [...(node.textLines.length ? node.textLines : ['']), formatCount(node.n)];
-    const lineHeight = 20;
-    const totalHeight = lineHeight * nodeLines.length;
-    const startY = y + BOX_HEIGHT / 2 - totalHeight / 2 + 6;
+    const nodeLines = getNodeDisplayLines(node);
+    const totalHeight = LINE_HEIGHT * nodeLines.length;
+    const startY = y + nodeHeight / 2 - totalHeight / 2 + 6;
     svgParts.push(`<text x="${x + BOX_WIDTH / 2}" y="${startY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`);
     nodeLines.forEach((line, index) => {
-      const dy = index === 0 ? 0 : lineHeight;
+      const dy = index === 0 ? 0 : LINE_HEIGHT;
       const isCountLine = index === nodeLines.length - 1;
       svgParts.push(
         `<tspan x="${x + BOX_WIDTH / 2}" dy="${dy}"${isCountLine ? ' font-weight="600"' : ''}>${escapeText(
@@ -108,32 +117,4 @@ function escapeText(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function buildExclusionLines(exclusion: ExclusionBox): string[] {
-  const lines: string[] = [];
-  lines.push(exclusion.label || 'Excluded');
-  const visibleReasons = (exclusion.reasons ?? []).filter((reason) => {
-    if (reason.kind === 'auto') {
-      return reason.n != null && reason.n !== 0;
-    }
-    return true;
-  });
-  if (!visibleReasons.length) {
-    lines.push(formatCount(exclusion.total ?? null));
-    return lines;
-  }
-  visibleReasons.forEach((reason) => {
-    const label = reason.label || '—';
-    const value = formatReasonValue(reason.n ?? null);
-    lines.push(`${label}: ${value}`);
-  });
-  return lines;
-}
-
-function formatReasonValue(value: number | null): string {
-  if (value == null) {
-    return '—';
-  }
-  return formatCount(value).replace('N = ', '');
 }

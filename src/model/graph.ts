@@ -9,7 +9,8 @@ import {
   IntervalId,
   NodeId,
 } from './types';
-import { BOX_GAP_Y, BOX_HEIGHT } from './constants';
+import { BOX_GAP_Y } from './constants';
+import { computeNodeHeight } from './layout';
 
 const DEFAULT_TEXT = ['New step'];
 
@@ -296,10 +297,12 @@ export function relayoutLinear(graph: GraphState): GraphState {
     return cloned;
   }
   const ordered = orderNodes(cloned);
-  ordered.forEach((node, index) => {
-    node.position.y = index * (BOX_HEIGHT + BOX_GAP_Y);
+  let cursorY = 0;
+  ordered.forEach((node) => {
+    node.position.y = cursorY;
     node.position.x = 0;
     node.column = 0;
+    cursorY += computeNodeHeight(node) + BOX_GAP_Y;
   });
   return cloned;
 }
