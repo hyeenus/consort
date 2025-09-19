@@ -74,7 +74,6 @@ function ensureOtherReason(exclusion: ExclusionBox): void {
     n: null,
     kind: 'auto',
   };
-
   const sumUser = userReasons.reduce((acc, reason) => acc + (reason.n ?? 0), 0);
   const remainder = exclusion.total != null ? exclusion.total - sumUser : null;
 
@@ -83,8 +82,9 @@ function ensureOtherReason(exclusion: ExclusionBox): void {
   exclusion.reasons = [...userReasons];
   if (createdAuto && createdAuto.n != null) {
     exclusion.reasons.push(createdAuto);
-  } else if (existingAuto) {
-    // Keep reference for label retention, but do not duplicate.
+  } else if (existingAuto && existingAuto.label !== 'Other') {
+    // Preserve custom label even when the remainder is zero.
+    existingAuto.n = remainder;
     exclusion.reasons.push(existingAuto);
   }
 }
