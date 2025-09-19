@@ -113,11 +113,17 @@ function escapeText(value: string): string {
 function buildExclusionLines(exclusion: ExclusionBox): string[] {
   const lines: string[] = [];
   lines.push(exclusion.label || 'Excluded');
-  if (!exclusion.reasons || exclusion.reasons.length === 0) {
+  const visibleReasons = (exclusion.reasons ?? []).filter((reason) => {
+    if (reason.kind === 'auto') {
+      return reason.n != null && reason.n !== 0;
+    }
+    return true;
+  });
+  if (!visibleReasons.length) {
     lines.push(formatCount(exclusion.total ?? null));
     return lines;
   }
-  exclusion.reasons.forEach((reason) => {
+  visibleReasons.forEach((reason) => {
     const label = reason.label || '—';
     const value = formatReasonValue(reason.n ?? null);
     lines.push(`${label}: ${value}`);

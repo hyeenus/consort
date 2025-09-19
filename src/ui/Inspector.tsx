@@ -73,12 +73,14 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
       const nextExcludedCount = exclusion.total != null ? String(exclusion.total) : '';
       setExclusionCount((current) => (current === nextExcludedCount ? current : nextExcludedCount));
 
-      const nextDrafts = (exclusion.reasons ?? []).map((reason) => ({
-        id: reason.id,
-        label: reason.label,
-        count: reason.n != null ? String(reason.n) : '',
-        kind: reason.kind,
-      }));
+      const nextDrafts = (exclusion.reasons ?? [])
+        .filter((reason) => !(reason.kind === 'auto' && (!reason.n || reason.n === 0)))
+        .map((reason) => ({
+          id: reason.id,
+          label: reason.label,
+          count: reason.n != null ? String(reason.n) : '',
+          kind: reason.kind,
+        }));
 
       setReasonDrafts((current) => (areDraftsEqual(current, nextDrafts) ? current : nextDrafts));
       return;

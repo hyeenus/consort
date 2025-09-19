@@ -174,6 +174,7 @@ body {
   display: flex;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .reason-row .field {
@@ -198,17 +199,18 @@ body {
 }
 
 .remove-reason {
-  border: none;
-  background: transparent;
+  border: 1px solid #e0b5b5;
+  background: #fff3f3;
   color: #d92c2c;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  align-self: center;
 }
 
 .remove-reason:hover {
-  background: #f6d6d6;
+  background: #f1c5c5;
 }
 
 .add-reason {
