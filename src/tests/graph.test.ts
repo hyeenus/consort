@@ -3,6 +3,7 @@ import {
   addExclusionReason,
   addNodeBelow,
   createInitialGraph,
+  removeNode,
   recomputeGraph,
   updateExclusionCount,
   updateExclusionReasonCount,
@@ -53,5 +54,32 @@ describe('graph recalculation', () => {
     const manualGraph = recomputeGraph(graph, unlockedSettings);
     const manualAutoReason = manualGraph.intervals[intervalId].exclusion?.reasons.find((reason) => reason.kind === 'auto');
     expect(manualAutoReason?.n).toBe(autoReason?.n);
+  });
+
+  it('supports branching without disturbing main flow', () => {
+    let graph = createInitialGraph();
+    const rootId = graph.startNodeId!;
+    graph = addNodeBelow(graph, rootId); // first child
+    const firstChildId = graph.nodes[rootId].childIds[0];
+    graph = addNodeBelow(graph, firstChildId); // continue main path
+    graph = addNodeBelow(graph, rootId); // add branch child
+
+    const children = graph.nodes[rootId].childIds;
+    expect(children.length).toBe(2);
+    expect(children[0]).toBe(firstChildId);
+  });
+
+  it('removes a node and its subtree', () => {
+    let graph = createInitialGraph();
+    const rootId = graph.startNodeId!;
+    graph = addNodeBelow(graph, rootId);
+    const firstChildId = graph.nodes[rootId].childIds[0];
+    graph = addNodeBelow(graph, firstChildId);
+    const grandChildId = graph.nodes[firstChildId].childIds[0];
+
+    graph = removeNode(graph, firstChildId);
+    expect(graph.nodes[firstChildId]).toBeUndefined();
+    expect(graph.nodes[grandChildId]).toBeUndefined();
+    expect(graph.nodes[rootId].childIds.length).toBe(0);
   });
 });

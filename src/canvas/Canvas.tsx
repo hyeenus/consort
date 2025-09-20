@@ -16,24 +16,60 @@ interface CanvasProps {
   settings: AppSettings;
   onSelect: (id: string | undefined) => void;
   onCreateBelow: (nodeId: string) => void;
+  onBranch: (nodeId: string) => void;
+  onRemove: (nodeId: string) => void;
 }
 
 const CANVAS_MARGIN = 120;
-export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCreateBelow }) => {
+
+interface CanvasMetrics {
+  width: number;
+  height: number;
+  centerX: number;
+  verticalOffset: number;
+}
+export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCreateBelow, onBranch, onRemove }) => {
   const nodesOrdered = useMemo(() => orderNodes(graph), [graph]);
 
-  const lastNode = nodesOrdered[nodesOrdered.length - 1];
-  const height = lastNode
-    ? CANVAS_MARGIN + lastNode.position.y + computeNodeHeight(lastNode)
-    : CANVAS_MARGIN;
-  const width = 960;
-  const centerX = width / 3;
+  const metrics = useMemo(() => {
+    if (!nodesOrdered.length) {
+      return {
+        width: 960,
+        height: CANVAS_MARGIN,
+        centerX: 480,
+        verticalOffset: CANVAS_MARGIN / 2,
+        minX: 0,
+      };
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let maxBottom = 0;
+    nodesOrdered.forEach((node) => {
+      const center = node.position.x;
+      const halfWidth = BOX_WIDTH / 2;
+      const top = node.position.y;
+      const bottom = top + computeNodeHeight(node);
+      minX = Math.min(minX, center - halfWidth);
+      maxX = Math.max(maxX, center + halfWidth);
+      maxBottom = Math.max(maxBottom, bottom);
+    });
+    const width = Math.max(960, maxX - minX + CANVAS_MARGIN);
+    const centerX = -minX + CANVAS_MARGIN / 2;
+    const height = maxBottom + CANVAS_MARGIN;
+    return {
+      width,
+      height,
+      centerX,
+      verticalOffset: CANVAS_MARGIN / 2,
+      minX,
+    };
+  }, [nodesOrdered]);
 
-  const intervalEntries = useMemo(() => Object.values(graph.intervals), [graph.intervals]);
+const intervalEntries = useMemo(() => Object.values(graph.intervals), [graph.intervals]);
 
   return (
     <div className="canvas-container">
-      <svg className="canvas-svg" width={width} height={height}>
+      <svg className="canvas-svg" width={metrics.width} height={metrics.height}>
         <defs>
           <marker
             id="arrowhead"
@@ -47,85 +83,27 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
             <path d="M0,0 L6,3 L0,6 z" fill="#111" />
           </marker>
         </defs>
-        {intervalEntries.map((interval) => {
-          const parent = graph.nodes[interval.parentId];
-          const child = graph.nodes[interval.childId];
-          if (!parent || !child) {
-            return null;
-          }
-          const parentY = CANVAS_MARGIN / 2 + parent.position.y;
-          const childY = CANVAS_MARGIN / 2 + child.position.y;
-          const parentHeight = computeNodeHeight(parent);
-          const x = centerX;
-          const top = parentY + parentHeight;
-          const bottom = childY;
-          const midY = top + (bottom - top) / 2;
-          const isSelected = graph.selectedId === interval.id;
-          const stroke = isSelected ? '#0057ff' : '#111';
+        {intervalEntries.map((interval) =>
+          renderInterval({
+            interval,
+            graph,
+            settings,
+            onSelect,
+            metrics,
+          })
+        )}
 
-          return (
-            <g key={interval.id} onClick={() => onSelect(interval.id)} className="canvas-interval">
-              <line
-                x1={x}
-                y1={top}
-                x2={x}
-                y2={bottom}
-                stroke={stroke}
-                strokeWidth={isSelected ? 3 : 2}
-                markerEnd={shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined}
-              />
-              {renderDeltaBadge(interval, x - 80, midY)}
-              {renderExclusion(interval, x, midY, stroke, isSelected, onSelect, settings)}
-            </g>
-          );
-        })}
-
-        {nodesOrdered.map((node) => {
-          const x = centerX - BOX_WIDTH / 2;
-          const y = CANVAS_MARGIN / 2 + node.position.y;
-          const isSelected = graph.selectedId === node.id;
-          const displayLines = getNodeDisplayLines(node);
-          const boxHeight = computeNodeHeight(node);
-          return (
-            <g key={node.id} onClick={() => onSelect(node.id)} className={classNames('canvas-node', { selected: isSelected })}>
-              <rect
-                x={x}
-                y={y}
-                width={BOX_WIDTH}
-                height={boxHeight}
-                rx={8}
-                ry={8}
-                fill="#fff"
-                stroke={isSelected ? '#0057ff' : '#111'}
-                strokeWidth={isSelected ? 3 : 2}
-              />
-              {renderCenteredLines(displayLines, centerX, y, boxHeight, {
-                textClass: 'node-text',
-                countClass: 'node-count',
-              })}
-              <g
-                className="add-handle"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCreateBelow(node.id);
-                }}
-              >
-                <rect
-                  x={centerX - 16}
-                  y={y + boxHeight + 12}
-                  width={32}
-                  height={32}
-                  rx={8}
-                  fill="#0057ff"
-                  stroke="#0057ff"
-                />
-                <text x={centerX} y={y + boxHeight + 32} textAnchor="middle" fontSize={20} fill="#ffffff">
-                  +
-                </text>
-              </g>
-            </g>
-          );
-        })}
+        {nodesOrdered.map((node) =>
+          renderNode({
+            node,
+            graph,
+            onSelect,
+            onCreateBelow,
+            onBranch,
+            onRemove,
+            metrics,
+          })
+        )}
       </svg>
     </div>
   );
@@ -133,6 +111,159 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
 
 function shouldShowArrow(settings: AppSettings, interval: Interval) {
   return settings.arrowsGlobal && interval.arrow;
+}
+
+interface RenderIntervalProps {
+  interval: Interval;
+  graph: GraphState;
+  settings: AppSettings;
+  onSelect: (id: string | undefined) => void;
+  metrics: CanvasMetrics;
+}
+
+function renderInterval({ interval, graph, settings, onSelect, metrics }: RenderIntervalProps) {
+  const parent = graph.nodes[interval.parentId];
+  const child = graph.nodes[interval.childId];
+  if (!parent || !child) {
+    return null;
+  }
+
+  const parentCenterX = metrics.centerX + parent.position.x;
+  const childCenterX = metrics.centerX + child.position.x;
+  const parentTopY = metrics.verticalOffset + parent.position.y;
+  const childTopY = metrics.verticalOffset + child.position.y;
+  const parentHeight = computeNodeHeight(parent);
+  const parentBottomY = parentTopY + parentHeight;
+  const childTop = childTopY;
+  const isSelected = graph.selectedId === interval.id;
+  const stroke = isSelected ? '#0057ff' : '#111';
+
+  let path = '';
+  let labelX = parentCenterX;
+  let labelY = parentBottomY + (childTop - parentBottomY) / 2;
+
+  if (Math.abs(parentCenterX - childCenterX) < 0.1) {
+    path = `M ${parentCenterX} ${parentBottomY} L ${childCenterX} ${childTop}`;
+  } else {
+    const junctionY = parentBottomY + (childTop - parentBottomY) / 2;
+    path = `M ${parentCenterX} ${parentBottomY} L ${parentCenterX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${childTop}`;
+    labelX = (parentCenterX + childCenterX) / 2;
+    labelY = junctionY - 10;
+  }
+
+  const allowExclusion = (parent.childIds ?? []).length <= 2;
+
+  return (
+    <g
+      key={interval.id}
+      onClick={() => onSelect(interval.id)}
+      className="canvas-interval"
+      style={{ cursor: 'pointer' }}
+    >
+      <path
+        d={path}
+        stroke={stroke}
+        fill="none"
+        strokeWidth={isSelected ? 3 : 2}
+        markerEnd={shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined}
+      />
+      {renderDeltaBadge(interval, labelX, labelY)}
+      {renderExclusion({
+        interval,
+        parent,
+        child,
+        onSelect,
+        isSelected,
+        metrics,
+        allowExclusion,
+      })}
+    </g>
+  );
+}
+
+interface RenderNodeProps {
+  node: GraphState['nodes'][string];
+  graph: GraphState;
+  onSelect: (id: string | undefined) => void;
+  onCreateBelow: (nodeId: string) => void;
+  onBranch: (nodeId: string) => void;
+  onRemove: (nodeId: string) => void;
+  metrics: CanvasMetrics;
+}
+
+function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, metrics }: RenderNodeProps) {
+  const nodeCenterX = metrics.centerX + node.position.x;
+  const x = nodeCenterX - BOX_WIDTH / 2;
+  const y = metrics.verticalOffset + node.position.y;
+  const isSelected = graph.selectedId === node.id;
+  const displayLines = getNodeDisplayLines(node);
+  const boxHeight = computeNodeHeight(node);
+  const isRoot = graph.startNodeId === node.id;
+
+  const buttonSize = 28;
+  const spacing = 6;
+  const controls = [
+    { label: '+', onClick: () => onCreateBelow(node.id), hidden: false },
+    { label: '⎇', onClick: () => onBranch(node.id), hidden: false },
+    { label: '−', onClick: () => onRemove(node.id), hidden: isRoot },
+  ].filter((btn) => !btn.hidden);
+
+  const controlsTotalWidth = controls.length * buttonSize + Math.max(0, controls.length - 1) * spacing;
+  let controlX = nodeCenterX - controlsTotalWidth / 2;
+
+  return (
+    <g
+      key={node.id}
+      onClick={() => onSelect(node.id)}
+      className={classNames('canvas-node', { selected: isSelected })}
+      style={{ cursor: 'pointer' }}
+    >
+      <rect
+        x={x}
+        y={y}
+        width={BOX_WIDTH}
+        height={boxHeight}
+        rx={8}
+        ry={8}
+        fill="#fff"
+        stroke={isSelected ? '#0057ff' : '#111'}
+        strokeWidth={isSelected ? 3 : 2}
+      />
+      {renderCenteredLines(displayLines, nodeCenterX, y, boxHeight, {
+        textClass: 'node-text',
+        countClass: 'node-count',
+      })}
+      {controls.map((btn) => {
+        const currentX = controlX;
+        controlX += buttonSize + spacing;
+        const title = btn.label === '+' ? 'Add step' : btn.label === '⎇' ? 'Add branch' : 'Remove';
+        return (
+          <g
+            key={btn.label}
+            className="node-control"
+            onClick={(event) => {
+              event.stopPropagation();
+              btn.onClick();
+            }}
+          >
+            <title>{title}</title>
+            <rect
+              x={currentX}
+              y={y + boxHeight + 12}
+              width={buttonSize}
+              height={buttonSize}
+              rx={8}
+              fill="#0057ff"
+              stroke="#0057ff"
+            />
+            <text x={currentX + buttonSize / 2} y={y + boxHeight + 12 + buttonSize / 2 + 6} textAnchor="middle" fontSize={16} fill="#ffffff">
+              {btn.label}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
 }
 
 function renderDeltaBadge(interval: Interval, x: number, y: number) {
@@ -150,27 +281,56 @@ function renderDeltaBadge(interval: Interval, x: number, y: number) {
   );
 }
 
-function renderExclusion(
-  interval: Interval,
-  axisX: number,
-  midY: number,
-  stroke: string,
-  isSelected: boolean,
-  onSelect: (id: string | undefined) => void,
-  settings: AppSettings
-) {
-  const boxX = axisX + EXCLUSION_OFFSET_X;
+interface RenderExclusionProps {
+  interval: Interval;
+  parent: GraphState['nodes'][string];
+  child: GraphState['nodes'][string];
+  onSelect: (id: string | undefined) => void;
+  isSelected: boolean;
+  metrics: CanvasMetrics;
+  allowExclusion: boolean;
+}
+
+function renderExclusion({ interval, parent, child, onSelect, isSelected, metrics, allowExclusion }: RenderExclusionProps) {
+  if (!allowExclusion) {
+    return null;
+  }
   const exclusion = interval.exclusion ?? {
     label: 'Excluded',
     total: null,
     reasons: [],
   };
+  const lines = getExclusionDisplayLines(exclusion);
+  if (!lines.length) {
+    return null;
+  }
+
+  const parentCenterX = metrics.centerX + parent.position.x;
+  const childCenterX = metrics.centerX + child.position.x;
+  const childTopY = metrics.verticalOffset + child.position.y;
+  const childHeight = computeNodeHeight(child);
+  const midY = childTopY + childHeight / 2;
+  const isLeft = childCenterX < parentCenterX;
+  const highlightStroke = isSelected ? '#0057ff' : '#111';
+  const strokeColor = '#111';
+
+  let lineStartX: number;
+  let lineEndX: number;
+  let boxX: number;
+
+  if (isLeft) {
+    lineStartX = childCenterX - BOX_WIDTH / 2;
+    lineEndX = lineStartX - EXCLUSION_OFFSET_X;
+    boxX = lineEndX - EXCLUSION_WIDTH;
+  } else {
+    lineStartX = childCenterX + BOX_WIDTH / 2;
+    lineEndX = lineStartX + EXCLUSION_OFFSET_X;
+    boxX = lineEndX;
+  }
+
   const exclusionHeight = computeExclusionHeight(exclusion);
   const boxY = midY - exclusionHeight / 2;
-  const highlightStroke = isSelected ? '#0057ff' : '#111';
-
-  const lines = getExclusionDisplayLines(exclusion);
-  const arrowMarker = shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined;
+  const lineTargetX = isLeft ? lineEndX : boxX;
 
   return (
     <g
@@ -181,13 +341,12 @@ function renderExclusion(
       }}
     >
       <line
-        x1={axisX}
+        x1={lineStartX}
         y1={midY}
-        x2={boxX}
+        x2={lineTargetX}
         y2={midY}
-        stroke={stroke}
+        stroke={strokeColor}
         strokeWidth={isSelected ? 3 : 2}
-        markerEnd={arrowMarker}
       />
       <rect
         x={boxX}

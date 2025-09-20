@@ -17,6 +17,7 @@ import {
   updateExclusionReasonLabel,
   updateExclusionReasonCount,
   removeExclusionReason,
+  removeNode,
 } from '../model/graph';
 
 interface HistorySnapshot {
@@ -37,6 +38,7 @@ interface AppStore {
   history: HistoryState;
   actions: {
     addNodeBelow: (parentId: NodeId) => void;
+    addBranchChild: (parentId: NodeId) => void;
     updateNodeText: (nodeId: NodeId, textLines: string[]) => void;
     updateNodeCount: (nodeId: NodeId, value: number | null) => void;
     updateExclusionLabel: (intervalId: IntervalId, label: string) => void;
@@ -45,6 +47,7 @@ interface AppStore {
     updateExclusionReasonLabel: (intervalId: IntervalId, reasonId: string, label: string) => void;
     updateExclusionReasonCount: (intervalId: IntervalId, reasonId: string, value: number | null) => void;
     removeExclusionReason: (intervalId: IntervalId, reasonId: string) => void;
+    removeNode: (nodeId: NodeId) => void;
     toggleAutoCalc: () => void;
     toggleArrowsGlobal: () => void;
     toggleArrow: (intervalId: IntervalId) => void;
@@ -94,13 +97,26 @@ export const useAppStore = create<AppStore>()(
           addNodeBelow: (parentId) => {
             const prev = cloneSnapshot(get().graph, get().settings);
             set((state) => {
-              const updatedGraph = recomputeGraph(addNodeBelow(state.graph, parentId), state.settings);
+              const parent = state.graph.nodes[parentId];
+              let targetParentId = parentId;
+              if (parent?.childIds && parent.childIds.length > 0) {
+                targetParentId = parent.childIds[parent.childIds.length - 1];
+              }
+              const updatedGraph = recomputeGraph(addNodeBelow(state.graph, targetParentId), state.settings);
               return {
                 ...state,
                 graph: updatedGraph,
                 history: pushHistory(state.history, prev),
               };
             });
+          },
+          addBranchChild: (parentId) => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => ({
+              ...state,
+              graph: recomputeGraph(addNodeBelow(state.graph, parentId), state.settings),
+              history: pushHistory(state.history, prev),
+            }));
           },
           updateNodeText: (nodeId, textLines) => {
             const prev = cloneSnapshot(get().graph, get().settings);
@@ -175,6 +191,14 @@ export const useAppStore = create<AppStore>()(
             set((state) => ({
               ...state,
               graph: recomputeGraph(removeExclusionReason(state.graph, intervalId, reasonId), state.settings),
+              history: pushHistory(state.history, prev),
+            }));
+          },
+          removeNode: (nodeId) => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => ({
+              ...state,
+              graph: recomputeGraph(removeNode(state.graph, nodeId), state.settings),
               history: pushHistory(state.history, prev),
             }));
           },

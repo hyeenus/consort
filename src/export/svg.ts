@@ -13,12 +13,26 @@ const CANVAS_MARGIN = 120;
 
 export function generateSvg(graph: GraphState, settings: AppSettings): string {
   const nodesOrdered = orderNodes(graph);
-  const lastNode = nodesOrdered[nodesOrdered.length - 1];
-  const height = lastNode
-    ? CANVAS_MARGIN + lastNode.position.y + computeNodeHeight(lastNode)
-    : CANVAS_MARGIN;
-  const width = 960;
-  const centerX = width / 3;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let maxBottom = 0;
+  nodesOrdered.forEach((node) => {
+    const center = node.position.x;
+    const halfWidth = BOX_WIDTH / 2;
+    const top = node.position.y;
+    const bottom = top + computeNodeHeight(node);
+    minX = Math.min(minX, center - halfWidth);
+    maxX = Math.max(maxX, center + halfWidth);
+    maxBottom = Math.max(maxBottom, bottom);
+  });
+  if (!Number.isFinite(minX)) {
+    minX = -BOX_WIDTH / 2;
+    maxX = BOX_WIDTH / 2;
+  }
+  const width = Math.max(960, maxX - minX + CANVAS_MARGIN);
+  const centerX = -minX + CANVAS_MARGIN / 2;
+  const verticalOffset = CANVAS_MARGIN / 2;
+  const height = maxBottom + CANVAS_MARGIN;
 
   const svgParts: string[] = [];
 
@@ -41,33 +55,65 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     if (!parent || !child) {
       return;
     }
-    const parentY = CANVAS_MARGIN / 2 + parent.position.y;
-    const childY = CANVAS_MARGIN / 2 + child.position.y;
+    const parentCenterX = centerX + parent.position.x;
+    const childCenterX = centerX + child.position.x;
+    const parentTopY = verticalOffset + parent.position.y;
+    const childTopY = verticalOffset + child.position.y;
     const parentHeight = computeNodeHeight(parent);
-    const axisX = centerX;
-    const top = parentY + parentHeight;
-    const bottom = childY;
-    const midY = top + (bottom - top) / 2;
+    const parentBottomY = parentTopY + parentHeight;
+    const childTop = childTopY;
     const showArrow = settings.arrowsGlobal && interval.arrow;
 
-    svgParts.push(
-      `<line x1="${axisX}" y1="${top}" x2="${axisX}" y2="${bottom}" stroke="#111111" stroke-width="2"${
-        showArrow ? ' marker-end="url(#arrowhead)"' : ''
-      } />`
-    );
+    if (Math.abs(parentCenterX - childCenterX) < 0.1) {
+      svgParts.push(
+        `<line x1="${parentCenterX}" y1="${parentBottomY}" x2="${childCenterX}" y2="${childTop}" stroke="#111111" stroke-width="2"${
+          showArrow ? ' marker-end="url(#arrowhead)"' : ''
+        } />`
+      );
+    } else {
+      const junctionY = parentBottomY + (childTop - parentBottomY) / 2;
+      svgParts.push(
+        `<path d="M ${parentCenterX} ${parentBottomY} L ${parentCenterX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${childTop}" stroke="#111111" fill="none" stroke-width="2"${
+          showArrow ? ' marker-end="url(#arrowhead)"' : ''
+        } />`
+      );
+    }
 
-    const boxX = axisX + EXCLUSION_OFFSET_X;
+    const allowExclusion = (parent.childIds ?? []).length <= 2;
+    if (!allowExclusion) {
+      return;
+    }
+
     const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
-    const exclusionHeight = computeExclusionHeight(exclusion);
     const exclusionLines = getExclusionDisplayLines(exclusion);
-    const exclusionTotalHeight = LINE_HEIGHT * exclusionLines.length;
+    if (!exclusionLines.length) {
+      return;
+    }
+
+    const childHeight = computeNodeHeight(child);
+    const midY = childTopY + childHeight / 2;
+    const isLeft = childCenterX < parentCenterX;
+
+    let lineStartX: number;
+    let lineEndX: number;
+    let boxX: number;
+
+    if (isLeft) {
+      lineStartX = childCenterX - BOX_WIDTH / 2;
+      lineEndX = lineStartX - EXCLUSION_OFFSET_X;
+      boxX = lineEndX - EXCLUSION_WIDTH;
+    } else {
+      lineStartX = childCenterX + BOX_WIDTH / 2;
+      lineEndX = lineStartX + EXCLUSION_OFFSET_X;
+      boxX = lineEndX;
+    }
+
+    const exclusionHeight = computeExclusionHeight(exclusion);
     const boxY = midY - exclusionHeight / 2;
-    const exclusionStartY = boxY + exclusionHeight / 2 - exclusionTotalHeight / 2 + 6;
+    const exclusionStartY = boxY + exclusionHeight / 2 - (LINE_HEIGHT * exclusionLines.length) / 2 + 6;
 
     svgParts.push(
-      `<line x1="${axisX}" y1="${midY}" x2="${boxX}" y2="${midY}" stroke="#111111" stroke-width="2"${
-        showArrow ? ' marker-end="url(#arrowhead)"' : ''
-      } />`,
+      `<line x1="${lineStartX}" y1="${midY}" x2="${isLeft ? lineEndX : boxX}" y2="${midY}" stroke="#111111" stroke-width="2" />`,
       `<rect x="${boxX}" y="${boxY}" width="${EXCLUSION_WIDTH}" height="${exclusionHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
       `<text x="${boxX + EXCLUSION_WIDTH / 2}" y="${exclusionStartY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`
     );
@@ -84,8 +130,8 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
   });
 
   nodesOrdered.forEach((node) => {
-    const x = centerX - BOX_WIDTH / 2;
-    const y = CANVAS_MARGIN / 2 + node.position.y;
+    const x = centerX + node.position.x - BOX_WIDTH / 2;
+    const y = verticalOffset + node.position.y;
     const nodeHeight = computeNodeHeight(node);
     svgParts.push(
       `<rect x="${x}" y="${y}" width="${BOX_WIDTH}" height="${nodeHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`

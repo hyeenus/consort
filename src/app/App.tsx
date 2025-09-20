@@ -14,12 +14,14 @@ export const App: React.FC = () => {
   const settings = useAppStore((state) => state.settings);
   const {
     addNodeBelow,
+    addBranchChild,
     navigateSelection,
     selectById,
     toggleAutoCalc,
     toggleArrowsGlobal,
     undo,
     redo,
+    removeNode,
     createExportSnapshot,
     importSnapshot,
     reset,
@@ -162,6 +164,12 @@ export const App: React.FC = () => {
           onSelect={selectById}
           onCreateBelow={(nodeId) => {
             addNodeBelow(nodeId);
+          }}
+          onBranch={(nodeId) => {
+            addBranchChild(nodeId);
+          }}
+          onRemove={(nodeId) => {
+            removeNode(nodeId);
           }}
         />
         <Inspector graph={graph} settings={settings} focusSignal={focusSignal} />

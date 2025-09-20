@@ -166,6 +166,27 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
     return null;
   }
 
+  const parentForInterval = graph.nodes[interval.parentId];
+  const allowExclusion = (parentForInterval?.childIds ?? []).length <= 2;
+
+  if (!allowExclusion) {
+    return (
+      <aside className="inspector">
+        <h3>Exclusion Details</h3>
+        <p className="hint">Exclusions are disabled when a node has three or more branches.</p>
+        <label className="field">
+          <span>Label</span>
+          <input type="text" value={exclusionLabel} readOnly />
+        </label>
+        <label className="field">
+          <span>Excluded Count</span>
+          <input type="text" value={exclusionCount} readOnly />
+        </label>
+        <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
+      </aside>
+    );
+  }
+
   return (
     <aside className="inspector">
       <h3>Exclusion Details</h3>

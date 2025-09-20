@@ -8,6 +8,7 @@ export interface BoxNode {
   position: { x: number; y: number };
   column: number;
   autoLocked: boolean;
+  childIds: NodeId[];
 }
 
 export type ExclusionReasonKind = 'user' | 'auto';
