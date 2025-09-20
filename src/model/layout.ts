@@ -6,7 +6,10 @@ export const LINE_HEIGHT = 20;
 export const NODE_MIN_HEIGHT = 120;
 export const EXCLUSION_MIN_HEIGHT = 120;
 export const LEVEL_GAP_Y = 64;
-export const BRANCH_GAP_X = 80;
+export const BRANCH_GAP_X = 32;
+const BRANCH_WIDTH_SCALE = 0.67;
+const BRANCH_HEIGHT_SCALE = 0.67;
+const BRANCH_MIN_HEIGHT = NODE_MIN_HEIGHT * BRANCH_HEIGHT_SCALE;
 const NODE_VERTICAL_PADDING = 32;
 const EXCLUSION_VERTICAL_PADDING = 32;
 const NODE_MAX_CHARS = 26;
@@ -121,6 +124,16 @@ function ensureChildIds(node: BoxNode): NodeId[] {
   return node.childIds;
 }
 
+export function getNodeDimensions(node: BoxNode, parent?: BoxNode): { width: number; height: number } {
+  const baseHeight = computeNodeHeight(node);
+  if (parent && (parent.childIds?.length ?? 0) > 1) {
+    const width = BOX_WIDTH * BRANCH_WIDTH_SCALE;
+    const height = Math.max(BRANCH_MIN_HEIGHT, baseHeight * BRANCH_HEIGHT_SCALE);
+    return { width, height };
+  }
+  return { width: BOX_WIDTH, height: baseHeight };
+}
+
 export function layoutTree(
   nodes: Record<NodeId, BoxNode>,
   startNodeId: NodeId | null
@@ -131,42 +144,44 @@ export function layoutTree(
 
   const widths = new Map<NodeId, number>();
 
-  const computeWidth = (nodeId: NodeId): number => {
+  const computeWidth = (nodeId: NodeId, parentNode?: BoxNode): number => {
     const node = nodes[nodeId];
     if (!node) {
       return 0;
     }
     const children = ensureChildIds(node);
+    const { width: nodeWidth } = getNodeDimensions(node, parentNode);
     if (!children.length) {
-      const width = BOX_WIDTH;
-      widths.set(nodeId, width);
-      return width;
+      widths.set(nodeId, nodeWidth);
+      return nodeWidth;
     }
     let total = 0;
     children.forEach((childId, index) => {
-      const childWidth = computeWidth(childId);
+      const childWidth = computeWidth(childId, node);
       if (index > 0) {
         total += BRANCH_GAP_X;
       }
       total += childWidth;
     });
-    const width = Math.max(BOX_WIDTH, total);
+    const width = Math.max(nodeWidth, total);
     widths.set(nodeId, width);
     return width;
   };
 
   const order: NodeId[] = [];
 
-  const assign = (nodeId: NodeId, center: number, currentY: number) => {
+  const assign = (nodeId: NodeId, center: number, currentY: number, parentNode?: BoxNode) => {
     const node = nodes[nodeId];
     if (!node) {
       return;
     }
     ensureChildIds(node);
+    const { width: nodeWidth, height: nodeHeight } = getNodeDimensions(node, parentNode);
+    (node as unknown as { __layoutWidth?: number; __layoutHeight?: number }).__layoutWidth = nodeWidth;
+    (node as unknown as { __layoutWidth?: number; __layoutHeight?: number }).__layoutHeight = nodeHeight;
     node.position.x = center;
     node.position.y = currentY;
     order.push(nodeId);
-    const nodeHeight = computeNodeHeight(node);
     if (!node.childIds.length) {
       return;
     }
@@ -177,13 +192,13 @@ export function layoutTree(
     node.childIds.forEach((childId, index) => {
       const childWidth = childWidths[index];
       const childCenter = start + childWidth / 2;
-      assign(childId, childCenter, nextY);
+      assign(childId, childCenter, nextY, node);
       start += childWidth + BRANCH_GAP_X;
     });
   };
 
-  computeWidth(startNodeId);
-  assign(startNodeId, 0, 0);
+  computeWidth(startNodeId, undefined);
+  assign(startNodeId, 0, 0, undefined);
 
   return { order };
 }

@@ -22,6 +22,14 @@ interface CanvasProps {
 
 const CANVAS_MARGIN = 120;
 
+function nodeWidth(node: GraphState['nodes'][string]): number {
+  return (node as unknown as { __layoutWidth?: number }).__layoutWidth ?? BOX_WIDTH;
+}
+
+function nodeHeight(node: GraphState['nodes'][string]): number {
+  return (node as unknown as { __layoutHeight?: number }).__layoutHeight ?? computeNodeHeight(node);
+}
+
 interface CanvasMetrics {
   width: number;
   height: number;
@@ -46,10 +54,12 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
     let maxBottom = 0;
     const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
     nodesOrdered.forEach((node) => {
+      const width = nodeWidth(node);
+      const height = nodeHeight(node);
       const center = node.position.x;
-      const halfWidth = BOX_WIDTH / 2;
+      const halfWidth = width / 2;
       const top = node.position.y;
-      const bottom = top + computeNodeHeight(node);
+      const bottom = top + height;
       minX = Math.min(minX, center - halfWidth - exclusionReach);
       maxX = Math.max(maxX, center + halfWidth + exclusionReach);
       maxBottom = Math.max(maxBottom, bottom);
@@ -133,8 +143,8 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const childCenterX = metrics.centerX + child.position.x;
   const parentTopY = metrics.verticalOffset + parent.position.y;
   const childTopY = metrics.verticalOffset + child.position.y;
-  const parentHeight = computeNodeHeight(parent);
-  const parentBottomY = parentTopY + parentHeight;
+  const parentHeightValue = nodeHeight(parent);
+  const parentBottomY = parentTopY + parentHeightValue;
   const childTop = childTopY;
   const isSelected = graph.selectedId === interval.id;
   const stroke = isSelected ? '#0057ff' : '#111';
@@ -143,20 +153,24 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   let path = '';
   let anchorX = parentCenterX;
   let anchorY = parentBottomY + (childTop - parentBottomY) / 2;
-  let deltaOffsetX = -60;
+  let deltaOffsetX = 0;
+  let deltaOffsetY = 28;
 
   if (isStraight) {
     path = `M ${parentCenterX} ${parentBottomY} L ${childCenterX} ${childTop}`;
+    deltaOffsetX = 0;
+    deltaOffsetY = 36;
   } else {
     const junctionY = parentBottomY + (childTop - parentBottomY) / 2;
     path = `M ${parentCenterX} ${parentBottomY} L ${parentCenterX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${childTop}`;
     anchorX = parentCenterX;
     anchorY = junctionY;
-    deltaOffsetX = childCenterX > parentCenterX ? 60 : -60;
+    deltaOffsetX = childCenterX > parentCenterX ? 48 : -48;
+    deltaOffsetY = 28;
   }
 
   const deltaX = anchorX + deltaOffsetX;
-  const deltaY = anchorY - 10;
+  const deltaY = anchorY - deltaOffsetY;
   const allowExclusion = (parent.childIds ?? []).length <= 2;
 
   return (
@@ -199,11 +213,12 @@ interface RenderNodeProps {
 
 function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, metrics }: RenderNodeProps) {
   const nodeCenterX = metrics.centerX + node.position.x;
-  const x = nodeCenterX - BOX_WIDTH / 2;
+  const width = nodeWidth(node);
+  const boxHeight = nodeHeight(node);
+  const x = nodeCenterX - width / 2;
   const y = metrics.verticalOffset + node.position.y;
   const isSelected = graph.selectedId === node.id;
   const displayLines = getNodeDisplayLines(node);
-  const boxHeight = computeNodeHeight(node);
   const isRoot = graph.startNodeId === node.id;
 
   const buttonSize = 28;
@@ -227,7 +242,7 @@ function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, 
       <rect
         x={x}
         y={y}
-        width={BOX_WIDTH}
+        width={width}
         height={boxHeight}
         rx={8}
         ry={8}
