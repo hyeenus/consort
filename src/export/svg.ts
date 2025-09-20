@@ -16,18 +16,20 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
   let minX = Infinity;
   let maxX = -Infinity;
   let maxBottom = 0;
+  const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
   nodesOrdered.forEach((node) => {
     const center = node.position.x;
     const halfWidth = BOX_WIDTH / 2;
     const top = node.position.y;
     const bottom = top + computeNodeHeight(node);
-    minX = Math.min(minX, center - halfWidth);
-    maxX = Math.max(maxX, center + halfWidth);
+    minX = Math.min(minX, center - halfWidth - exclusionReach);
+    maxX = Math.max(maxX, center + halfWidth + exclusionReach);
     maxBottom = Math.max(maxBottom, bottom);
   });
   if (!Number.isFinite(minX)) {
-    minX = -BOX_WIDTH / 2;
-    maxX = BOX_WIDTH / 2;
+    const fallbackHalf = BOX_WIDTH / 2 + exclusionReach;
+    minX = -fallbackHalf;
+    maxX = fallbackHalf;
   }
   const width = Math.max(960, maxX - minX + CANVAS_MARGIN);
   const centerX = -minX + CANVAS_MARGIN / 2;
@@ -64,7 +66,12 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const childTop = childTopY;
     const showArrow = settings.arrowsGlobal && interval.arrow;
 
-    if (Math.abs(parentCenterX - childCenterX) < 0.1) {
+    const isStraight = Math.abs(parentCenterX - childCenterX) < 0.1;
+    let anchorX = parentCenterX;
+    let anchorY = parentBottomY + (childTop - parentBottomY) / 2;
+    let deltaOffsetX = -60;
+
+    if (isStraight) {
       svgParts.push(
         `<line x1="${parentCenterX}" y1="${parentBottomY}" x2="${childCenterX}" y2="${childTop}" stroke="#111111" stroke-width="2"${
           showArrow ? ' marker-end="url(#arrowhead)"' : ''
@@ -76,6 +83,19 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
         `<path d="M ${parentCenterX} ${parentBottomY} L ${parentCenterX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${childTop}" stroke="#111111" fill="none" stroke-width="2"${
           showArrow ? ' marker-end="url(#arrowhead)"' : ''
         } />`
+      );
+      anchorX = parentCenterX;
+      anchorY = junctionY;
+      deltaOffsetX = childCenterX > parentCenterX ? 60 : -60;
+    }
+
+    if (interval.delta) {
+      const deltaX = anchorX + deltaOffsetX;
+      const deltaY = anchorY - 10;
+      const label = interval.delta > 0 ? `Δ = +${interval.delta}` : `Δ = ${interval.delta}`;
+      svgParts.push(
+        `<g class="delta-badge"><rect x="${deltaX - 32}" y="${deltaY - 12}" width="64" height="24" rx="12" fill="#d92c2c" />` +
+          `<text x="${deltaX}" y="${deltaY + 4}" fill="#ffffff" font-size="12" font-weight="bold" text-anchor="middle">${label}</text></g>`
       );
     }
 
@@ -90,30 +110,18 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
       return;
     }
 
-    const childHeight = computeNodeHeight(child);
-    const midY = childTopY + childHeight / 2;
     const isLeft = childCenterX < parentCenterX;
-
-    let lineStartX: number;
-    let lineEndX: number;
-    let boxX: number;
-
-    if (isLeft) {
-      lineStartX = childCenterX - BOX_WIDTH / 2;
-      lineEndX = lineStartX - EXCLUSION_OFFSET_X;
-      boxX = lineEndX - EXCLUSION_WIDTH;
-    } else {
-      lineStartX = childCenterX + BOX_WIDTH / 2;
-      lineEndX = lineStartX + EXCLUSION_OFFSET_X;
-      boxX = lineEndX;
-    }
-
+    const lineEndX = isLeft ? anchorX - EXCLUSION_OFFSET_X : anchorX + EXCLUSION_OFFSET_X;
+    const boxX = isLeft ? lineEndX - EXCLUSION_WIDTH : lineEndX;
     const exclusionHeight = computeExclusionHeight(exclusion);
-    const boxY = midY - exclusionHeight / 2;
+    const boxY = anchorY - exclusionHeight / 2;
     const exclusionStartY = boxY + exclusionHeight / 2 - (LINE_HEIGHT * exclusionLines.length) / 2 + 6;
+    const lineTargetX = isLeft ? lineEndX : boxX;
 
     svgParts.push(
-      `<line x1="${lineStartX}" y1="${midY}" x2="${isLeft ? lineEndX : boxX}" y2="${midY}" stroke="#111111" stroke-width="2" />`,
+      `<line x1="${anchorX}" y1="${anchorY}" x2="${lineTargetX}" y2="${anchorY}" stroke="#111111" stroke-width="2"${
+        showArrow ? ' marker-end="url(#arrowhead)"' : ''
+      } />`,
       `<rect x="${boxX}" y="${boxY}" width="${EXCLUSION_WIDTH}" height="${exclusionHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
       `<text x="${boxX + EXCLUSION_WIDTH / 2}" y="${exclusionStartY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`
     );

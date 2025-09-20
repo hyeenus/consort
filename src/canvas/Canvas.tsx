@@ -44,13 +44,14 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
     let minX = Infinity;
     let maxX = -Infinity;
     let maxBottom = 0;
+    const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
     nodesOrdered.forEach((node) => {
       const center = node.position.x;
       const halfWidth = BOX_WIDTH / 2;
       const top = node.position.y;
       const bottom = top + computeNodeHeight(node);
-      minX = Math.min(minX, center - halfWidth);
-      maxX = Math.max(maxX, center + halfWidth);
+      minX = Math.min(minX, center - halfWidth - exclusionReach);
+      maxX = Math.max(maxX, center + halfWidth + exclusionReach);
       maxBottom = Math.max(maxBottom, bottom);
     });
     const width = Math.max(960, maxX - minX + CANVAS_MARGIN);
@@ -138,19 +139,24 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const isSelected = graph.selectedId === interval.id;
   const stroke = isSelected ? '#0057ff' : '#111';
 
+  const isStraight = Math.abs(parentCenterX - childCenterX) < 0.1;
   let path = '';
-  let labelX = parentCenterX;
-  let labelY = parentBottomY + (childTop - parentBottomY) / 2;
+  let anchorX = parentCenterX;
+  let anchorY = parentBottomY + (childTop - parentBottomY) / 2;
+  let deltaOffsetX = -60;
 
-  if (Math.abs(parentCenterX - childCenterX) < 0.1) {
+  if (isStraight) {
     path = `M ${parentCenterX} ${parentBottomY} L ${childCenterX} ${childTop}`;
   } else {
     const junctionY = parentBottomY + (childTop - parentBottomY) / 2;
     path = `M ${parentCenterX} ${parentBottomY} L ${parentCenterX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${childTop}`;
-    labelX = (parentCenterX + childCenterX) / 2;
-    labelY = junctionY - 10;
+    anchorX = parentCenterX;
+    anchorY = junctionY;
+    deltaOffsetX = childCenterX > parentCenterX ? 60 : -60;
   }
 
+  const deltaX = anchorX + deltaOffsetX;
+  const deltaY = anchorY - 10;
   const allowExclusion = (parent.childIds ?? []).length <= 2;
 
   return (
@@ -167,15 +173,15 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
         strokeWidth={isSelected ? 3 : 2}
         markerEnd={shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined}
       />
-      {renderDeltaBadge(interval, labelX, labelY)}
+      {renderDeltaBadge(interval, deltaX, deltaY)}
       {renderExclusion({
         interval,
-        parent,
-        child,
         onSelect,
         isSelected,
-        metrics,
         allowExclusion,
+        anchor: { x: anchorX, y: anchorY },
+        showArrow: shouldShowArrow(settings, interval),
+        childToRight: childCenterX >= parentCenterX,
       })}
     </g>
   );
@@ -283,15 +289,15 @@ function renderDeltaBadge(interval: Interval, x: number, y: number) {
 
 interface RenderExclusionProps {
   interval: Interval;
-  parent: GraphState['nodes'][string];
-  child: GraphState['nodes'][string];
   onSelect: (id: string | undefined) => void;
   isSelected: boolean;
-  metrics: CanvasMetrics;
   allowExclusion: boolean;
+  anchor: { x: number; y: number };
+  showArrow: boolean;
+  childToRight: boolean;
 }
 
-function renderExclusion({ interval, parent, child, onSelect, isSelected, metrics, allowExclusion }: RenderExclusionProps) {
+function renderExclusion({ interval, onSelect, isSelected, allowExclusion, anchor, showArrow, childToRight }: RenderExclusionProps) {
   if (!allowExclusion) {
     return null;
   }
@@ -305,31 +311,17 @@ function renderExclusion({ interval, parent, child, onSelect, isSelected, metric
     return null;
   }
 
-  const parentCenterX = metrics.centerX + parent.position.x;
-  const childCenterX = metrics.centerX + child.position.x;
-  const childTopY = metrics.verticalOffset + child.position.y;
-  const childHeight = computeNodeHeight(child);
-  const midY = childTopY + childHeight / 2;
-  const isLeft = childCenterX < parentCenterX;
+  const isLeft = !childToRight;
   const highlightStroke = isSelected ? '#0057ff' : '#111';
   const strokeColor = '#111';
 
-  let lineStartX: number;
-  let lineEndX: number;
-  let boxX: number;
-
-  if (isLeft) {
-    lineStartX = childCenterX - BOX_WIDTH / 2;
-    lineEndX = lineStartX - EXCLUSION_OFFSET_X;
-    boxX = lineEndX - EXCLUSION_WIDTH;
-  } else {
-    lineStartX = childCenterX + BOX_WIDTH / 2;
-    lineEndX = lineStartX + EXCLUSION_OFFSET_X;
-    boxX = lineEndX;
-  }
+  const lineStartX = anchor.x;
+  const lineStartY = anchor.y;
+  const lineEndX = isLeft ? lineStartX - EXCLUSION_OFFSET_X : lineStartX + EXCLUSION_OFFSET_X;
+  const boxX = isLeft ? lineEndX - EXCLUSION_WIDTH : lineEndX;
 
   const exclusionHeight = computeExclusionHeight(exclusion);
-  const boxY = midY - exclusionHeight / 2;
+  const boxY = lineStartY - exclusionHeight / 2;
   const lineTargetX = isLeft ? lineEndX : boxX;
 
   return (
@@ -342,11 +334,12 @@ function renderExclusion({ interval, parent, child, onSelect, isSelected, metric
     >
       <line
         x1={lineStartX}
-        y1={midY}
+        y1={lineStartY}
         x2={lineTargetX}
-        y2={midY}
+        y2={lineStartY}
         stroke={strokeColor}
         strokeWidth={isSelected ? 3 : 2}
+        markerEnd={showArrow ? 'url(#arrowhead)' : undefined}
       />
       <rect
         x={boxX}

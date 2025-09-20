@@ -93,7 +93,10 @@ export function getExclusionDisplayLines(exclusion?: ExclusionBox): string[] {
   const label = exclusion?.label ?? 'Excluded';
   const visibleReasons = getVisibleReasons(exclusion);
   if (!visibleReasons.length) {
-    return [label, formatCount(exclusion?.total ?? null)];
+    if (exclusion?.total == null || exclusion.total === 0) {
+      return [];
+    }
+    return [label, formatCount(exclusion.total)];
   }
 
   const lines: string[] = [label];

@@ -114,7 +114,18 @@ export const useAppStore = create<AppStore>()(
             const prev = cloneSnapshot(get().graph, get().settings);
             set((state) => ({
               ...state,
-              graph: recomputeGraph(addNodeBelow(state.graph, parentId), state.settings),
+              graph: (() => {
+                let nextGraph = state.graph;
+                const parent = nextGraph.nodes[parentId];
+                const currentChildren = parent?.childIds?.length ?? 0;
+                if (currentChildren === 0) {
+                  nextGraph = addNodeBelow(nextGraph, parentId);
+                  nextGraph = addNodeBelow(nextGraph, parentId);
+                } else {
+                  nextGraph = addNodeBelow(nextGraph, parentId);
+                }
+                return recomputeGraph(nextGraph, state.settings);
+              })(),
               history: pushHistory(state.history, prev),
             }));
           },
