@@ -85,6 +85,15 @@ body {
   stroke: #0041c4;
 }
 
+.node-control rect {
+  cursor: pointer;
+}
+
+.node-control rect:hover {
+  fill: #0041c4;
+  stroke: #0041c4;
+}
+
 .node-text {
   font-size: 16px;
   fill: #111;

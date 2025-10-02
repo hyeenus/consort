@@ -17,7 +17,7 @@ interface InspectorProps {
   focusSignal: number;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
+export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSignal }) => {
   const {
     updateNodeText,
     updateNodeCount,
@@ -155,7 +155,7 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
             onChange={(event) => setCountValue(event.target.value)}
             onBlur={() => updateNodeCount(selectedId, parseCount(countValue))}
           />
-          <small className="hint">Shown as {formatCount(parseCount(countValue))}</small>
+          <small className="hint">Shown as {formatCount(parseCount(countValue), settings.countFormat)}</small>
         </label>
       </aside>
     );
@@ -164,6 +164,30 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, focusSignal }) => {
   const interval = graph.intervals[selectedId];
   if (!interval) {
     return null;
+  }
+
+  const parentForInterval = graph.nodes[interval.parentId];
+  const parentChildren = parentForInterval?.childIds ?? [];
+  const childIndex = parentChildren.indexOf(interval.childId);
+  const allowExclusion =
+    parentChildren.length <= 2 || childIndex === 0 || childIndex === parentChildren.length - 1;
+
+  if (!allowExclusion) {
+    return (
+      <aside className="inspector">
+        <h3>Exclusion Details</h3>
+        <p className="hint">Exclusions are disabled for middle branches when a node has three or more branches.</p>
+        <label className="field">
+          <span>Label</span>
+          <input type="text" value={exclusionLabel} readOnly />
+        </label>
+        <label className="field">
+          <span>Excluded Count</span>
+          <input type="text" value={exclusionCount} readOnly />
+        </label>
+        <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
+      </aside>
+    );
   }
 
   return (

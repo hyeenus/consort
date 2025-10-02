@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import {
   AppSettings,
   BoxNode,
+  CountFormat,
   ExclusionBox,
   ExclusionReason,
   GraphState,
@@ -9,8 +10,7 @@ import {
   IntervalId,
   NodeId,
 } from './types';
-import { BOX_GAP_Y } from './constants';
-import { computeNodeHeight } from './layout';
+import { layoutTree } from './layout';
 
 const DEFAULT_TEXT = ['New step'];
 
@@ -23,6 +23,7 @@ export function createInitialGraph(): GraphState {
     position: { x: 0, y: 0 },
     column: 0,
     autoLocked: false,
+    childIds: [],
   };
 
   return {
@@ -51,7 +52,15 @@ export function getIncomingInterval(graph: GraphState, nodeId: NodeId): Interval
 
 function cloneGraph(graph: GraphState): GraphState {
   return {
-    nodes: structuredClone(graph.nodes),
+    nodes: Object.fromEntries(
+      Object.entries(structuredClone(graph.nodes)).map(([id, node]) => [
+        id,
+        {
+          ...node,
+          childIds: Array.isArray(node.childIds) ? node.childIds : [],
+        },
+      ])
+    ),
     intervals: structuredClone(graph.intervals),
     startNodeId: graph.startNodeId,
     selectedId: graph.selectedId,
@@ -115,9 +124,8 @@ export function addNodeBelow(graph: GraphState, parentId: NodeId): GraphState {
     position: { x: 0, y: 0 },
     column: 0,
     autoLocked: false,
+    childIds: [],
   };
-
-  const outgoing = Object.values(cloned.intervals).find((interval) => interval.parentId === parentId);
   const newIntervalId: IntervalId = nanoid();
 
   cloned.intervals[newIntervalId] = {
@@ -128,14 +136,11 @@ export function addNodeBelow(graph: GraphState, parentId: NodeId): GraphState {
     delta: 0,
     arrow: true,
   };
-
-  if (outgoing) {
-    // Rewire existing interval so the previous child now hangs from the new node
-    outgoing.parentId = newNodeId;
-  }
+  cloned.nodes[parentId].childIds = [...(cloned.nodes[parentId].childIds ?? []), newNodeId];
 
   cloned.selectedId = newNodeId;
-  return relayoutLinear(cloned);
+  layoutGraphInPlace(cloned);
+  return cloned;
 }
 
 export function updateNodeText(graph: GraphState, nodeId: NodeId, textLines: string[]): GraphState {
@@ -263,72 +268,118 @@ export function setSelected(graph: GraphState, id: string | undefined): GraphSta
   return cloned;
 }
 
+export function getParentId(graph: GraphState, nodeId: NodeId): NodeId | undefined {
+  return Object.values(graph.intervals).find((interval) => interval.childId === nodeId)?.parentId;
+}
+
+function layoutGraphInPlace(graph: GraphState, countFormat: CountFormat = 'upper'): void {
+  Object.values(graph.nodes).forEach((node) => {
+    if (!Array.isArray(node.childIds)) {
+      node.childIds = [];
+    } else {
+      node.childIds = node.childIds.filter((childId) => graph.nodes[childId]);
+    }
+  });
+  const { order } = layoutTree(graph.nodes, graph.startNodeId, countFormat);
+  (graph as Record<string, unknown>).__order = order;
+}
+
 export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphState {
   const cloned = cloneGraph(graph);
+  const intervalMap = new Map<string, Interval>();
   Object.values(cloned.intervals).forEach((interval) => {
-    const parent = cloned.nodes[interval.parentId];
-    const child = cloned.nodes[interval.childId];
     if (!interval.exclusion) {
       interval.exclusion = createDefaultExclusion();
     }
-
-    if (settings.autoCalc && parent?.n != null) {
-      if (interval.exclusion.total == null && child?.n != null) {
-        interval.exclusion.total = parent.n - child.n;
-      } else if (interval.exclusion.total != null && child?.n == null) {
-        child.n = parent.n - interval.exclusion.total;
-      }
-    }
-
     ensureOtherReason(interval.exclusion);
-
-    const exclusionValue = interval.exclusion.total ?? 0;
-    const childValue = child?.n ?? 0;
-    const parentValue = parent?.n ?? 0;
-
-    interval.delta = parentValue - (childValue + exclusionValue);
+    intervalMap.set(`${interval.parentId}:${interval.childId}`, interval);
   });
-  return relayoutLinear(cloned);
-}
 
-export function relayoutLinear(graph: GraphState): GraphState {
-  const cloned = cloneGraph(graph);
-  if (!cloned.startNodeId) {
-    return cloned;
+  if (settings.autoCalc) {
+    Object.values(cloned.nodes).forEach((node) => {
+      if (!Array.isArray(node.childIds)) {
+        node.childIds = [];
+      }
+      const childIds = node.childIds;
+      if (childIds.length > 1 && node.n != null) {
+        const lastChildId = childIds[childIds.length - 1];
+        let remaining = node.n;
+        childIds.forEach((childId, index) => {
+          const interval = intervalMap.get(`${node.id}:${childId}`);
+          const exclusionValue = interval?.exclusion?.total ?? 0;
+          if (index < childIds.length - 1) {
+            const childNode = cloned.nodes[childId];
+            remaining -= (childNode?.n ?? 0) + exclusionValue;
+          }
+        });
+        const lastChildNode = cloned.nodes[lastChildId];
+        const lastInterval = intervalMap.get(`${node.id}:${lastChildId}`);
+        if (lastChildNode && lastChildNode.n == null) {
+          const adjustment = lastInterval?.exclusion?.total ?? 0;
+          const value = remaining - adjustment;
+          if (value >= 0) {
+            lastChildNode.n = value;
+          }
+        }
+      }
+    });
   }
-  const ordered = orderNodes(cloned);
-  let cursorY = 0;
-  ordered.forEach((node) => {
-    node.position.y = cursorY;
-    node.position.x = 0;
-    node.column = 0;
-    cursorY += computeNodeHeight(node) + BOX_GAP_Y;
+
+  Object.values(cloned.nodes).forEach((parentNode) => {
+    if (!Array.isArray(parentNode.childIds)) {
+      parentNode.childIds = [];
+    }
+    const childIds = parentNode.childIds;
+    if (!childIds.length) {
+      return;
+    }
+    if (childIds.length > 1) {
+      const parentValue = parentNode.n ?? 0;
+      const totalChildren = childIds.reduce((acc, childId) => {
+        const interval = intervalMap.get(`${parentNode.id}:${childId}`);
+        const childNode = cloned.nodes[childId];
+        const exclusionValue = interval?.exclusion?.total ?? 0;
+        ensureOtherReason(interval!.exclusion!);
+        return acc + (childNode?.n ?? 0) + exclusionValue;
+      }, 0);
+      const diff = parentValue - totalChildren;
+      childIds.forEach((childId) => {
+        const interval = intervalMap.get(`${parentNode.id}:${childId}`);
+        if (interval) {
+          interval.delta = diff;
+        }
+      });
+    } else {
+      const childId = childIds[0];
+      const interval = intervalMap.get(`${parentNode.id}:${childId}`);
+      const childNode = cloned.nodes[childId];
+      if (!interval) {
+        return;
+      }
+      if (settings.autoCalc && parentNode.n != null) {
+        if (interval.exclusion?.total == null && childNode?.n != null) {
+          interval.exclusion.total = parentNode.n - childNode.n;
+        } else if (interval.exclusion?.total != null && childNode?.n == null) {
+          childNode.n = parentNode.n - interval.exclusion.total;
+        }
+      }
+      const exclusionValue = interval.exclusion?.total ?? 0;
+      const childValue = childNode?.n ?? 0;
+      const parentValue = parentNode.n ?? 0;
+      interval.delta = parentValue - (childValue + exclusionValue);
+    }
   });
+
+  layoutGraphInPlace(cloned, settings.countFormat);
   return cloned;
 }
 
 export function orderNodes(graph: GraphState): BoxNode[] {
-  const startId = graph.startNodeId;
-  if (!startId) {
-    return [];
-  }
-  const result: BoxNode[] = [];
-  let currentId: NodeId | undefined = startId;
-  const visited = new Set<NodeId>();
-  while (currentId) {
-    if (visited.has(currentId)) {
-      break;
-    }
-    const node = graph.nodes[currentId];
-    if (!node) {
-      break;
-    }
-    result.push(node);
-    visited.add(currentId);
-    const outgoing = Object.values(graph.intervals).find((interval) => interval.parentId === currentId);
-    currentId = outgoing?.childId;
-  }
-  return result;
+  const cached = (graph as Record<string, unknown>).__order as NodeId[] | undefined;
+  const order = cached ?? layoutTree(graph.nodes, graph.startNodeId).order;
+  return order
+    .map((id) => graph.nodes[id])
+    .filter((node): node is BoxNode => Boolean(node));
 }
 
 export function toggleArrow(graph: GraphState, intervalId: IntervalId): GraphState {
@@ -341,35 +392,45 @@ export function toggleArrow(graph: GraphState, intervalId: IntervalId): GraphSta
   return cloned;
 }
 
-export function deleteInterval(graph: GraphState, intervalId: IntervalId): GraphState {
-  const cloned = cloneGraph(graph);
-  delete cloned.intervals[intervalId];
-  return relayoutLinear(cloned);
-}
-
 export function removeNode(graph: GraphState, nodeId: NodeId): GraphState {
   const cloned = cloneGraph(graph);
   if (cloned.startNodeId === nodeId) {
-    return cloned; // do not remove root in V1
+    return cloned; // do not remove root
   }
-  const incoming = getIncomingInterval(cloned, nodeId);
-  const outgoing = Object.values(cloned.intervals).find((interval) => interval.parentId === nodeId);
 
-  delete cloned.nodes[nodeId];
+  const parentId = getParentId(cloned, nodeId);
 
-  if (incoming) {
-    delete cloned.intervals[incoming.id];
-  }
-  if (outgoing) {
-    if (incoming) {
-      // Connect incoming parent directly to outgoing child
-      outgoing.parentId = incoming.parentId;
-    } else {
-      delete cloned.intervals[outgoing.id];
+  const nodesToRemove = new Set<NodeId>();
+  const collect = (id: NodeId) => {
+    if (nodesToRemove.has(id)) {
+      return;
     }
+    nodesToRemove.add(id);
+    const node = cloned.nodes[id];
+    const children = node?.childIds ?? [];
+    children.forEach(collect);
+  };
+  collect(nodeId);
+
+  Object.entries(cloned.intervals).forEach(([intervalId, interval]) => {
+    if (nodesToRemove.has(interval.childId) || nodesToRemove.has(interval.parentId)) {
+      delete cloned.intervals[intervalId];
+    }
+  });
+
+  nodesToRemove.forEach((id) => {
+    delete cloned.nodes[id];
+  });
+
+  if (parentId && cloned.nodes[parentId]) {
+    cloned.nodes[parentId].childIds = (cloned.nodes[parentId].childIds ?? []).filter(
+      (child) => !nodesToRemove.has(child)
+    );
   }
-  cloned.selectedId = outgoing?.childId ?? incoming?.parentId ?? cloned.startNodeId;
-  return relayoutLinear(cloned);
+
+  cloned.selectedId = parentId ?? cloned.startNodeId;
+  layoutGraphInPlace(cloned);
+  return cloned;
 }
 
 export function snapshotGraph(graph: GraphState): GraphState {
@@ -409,20 +470,26 @@ export function navigateSelection(graph: GraphState, direction: 'up' | 'down' | 
 }
 
 function navigateFromNode(graph: GraphState, nodeId: NodeId, direction: 'up' | 'down' | 'left' | 'right'): string | undefined {
-  const ordered = orderNodes(graph);
-  const index = ordered.findIndex((node) => node.id === nodeId);
-  if (index < 0) {
+  const node = graph.nodes[nodeId];
+  if (!node) {
     return undefined;
   }
+  const parentId = getParentId(graph, nodeId);
   switch (direction) {
     case 'up':
-      return ordered[index - 1]?.id ?? nodeId;
+      return parentId ?? nodeId;
     case 'down':
-      return GraphNavigation.getChildNodeId(graph, nodeId) ?? ordered[index + 1]?.id;
+      return node.childIds?.[0] ?? nodeId;
     case 'left':
-      return GraphNavigation.getIncomingIntervalId(graph, nodeId);
+      if (parentId) {
+        return GraphNavigation.getIntervalId(graph, parentId, nodeId) ?? parentId;
+      }
+      return nodeId;
     case 'right':
-      return GraphNavigation.getOutgoingIntervalId(graph, nodeId);
+      if (node.childIds?.length) {
+        return GraphNavigation.getIntervalId(graph, nodeId, node.childIds[0]) ?? node.childIds[0];
+      }
+      return nodeId;
     default:
       return undefined;
   }
@@ -441,20 +508,16 @@ function navigateFromInterval(graph: GraphState, intervalId: IntervalId, directi
     case 'left':
       return interval.parentId;
     case 'right':
-      return interval.id;
+      return interval.childId;
     default:
       return undefined;
   }
 }
 
 const GraphNavigation = {
-  getIncomingIntervalId(graph: GraphState, nodeId: NodeId): string | undefined {
-    return Object.values(graph.intervals).find((interval) => interval.childId === nodeId)?.id;
-  },
-  getOutgoingIntervalId(graph: GraphState, nodeId: NodeId): string | undefined {
-    return Object.values(graph.intervals).find((interval) => interval.parentId === nodeId)?.id;
-  },
-  getChildNodeId(graph: GraphState, nodeId: NodeId): string | undefined {
-    return Object.values(graph.intervals).find((interval) => interval.parentId === nodeId)?.childId;
+  getIntervalId(graph: GraphState, parentId: NodeId, childId: NodeId): string | undefined {
+    return Object.values(graph.intervals).find(
+      (interval) => interval.parentId === parentId && interval.childId === childId
+    )?.id;
   },
 };

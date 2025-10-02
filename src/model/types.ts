@@ -8,6 +8,7 @@ export interface BoxNode {
   position: { x: number; y: number };
   column: number;
   autoLocked: boolean;
+  childIds: NodeId[];
 }
 
 export type ExclusionReasonKind = 'user' | 'auto';
@@ -41,9 +42,12 @@ export interface GraphState {
   selectedId?: string;
 }
 
+export type CountFormat = 'upper' | 'parenthetical';
+
 export interface AppSettings {
   autoCalc: boolean;
   arrowsGlobal: boolean;
+  countFormat: CountFormat;
 }
 
 export interface PersistedProject {
