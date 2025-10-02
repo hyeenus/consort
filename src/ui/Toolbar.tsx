@@ -7,6 +7,7 @@ interface ToolbarProps {
   onAddStep: () => void;
   onToggleAutoCalc: () => void;
   onToggleArrows: () => void;
+  onToggleCountFormat: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onExportSvg: () => void;
@@ -21,6 +22,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onAddStep,
   onToggleAutoCalc,
   onToggleArrows,
+  onToggleCountFormat,
   onUndo,
   onRedo,
   onExportSvg,
@@ -46,6 +48,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
         <button type="button" onClick={onToggleArrows}>
           {settings.arrowsGlobal ? 'Show Lines' : 'Show Arrows'}
+        </button>
+        <button type="button" onClick={onToggleCountFormat}>
+          {settings.countFormat === 'upper' ? 'Show (n)' : 'Show N'}
         </button>
         <button type="button" onClick={onReset}>
           Reset

@@ -1,12 +1,14 @@
+import { CountFormat } from './types';
+
 const DEFAULT_LOCALE = 'en-space';
 
 const separators: Record<string, string> = {
   'en-space': ' ',
 };
 
-export function formatCount(n: number | null): string {
+export function formatInteger(n: number | null): string {
   if (n === null || Number.isNaN(n)) {
-    return 'N = —';
+    return '—';
   }
   const sep = separators[DEFAULT_LOCALE];
   const parts = Math.trunc(n)
@@ -22,7 +24,15 @@ export function formatCount(n: number | null): string {
       counter = 0;
     }
   }
-  return `N = ${out.join('')}`;
+  return out.join('');
+}
+
+export function formatCount(n: number | null, format: CountFormat = 'upper'): string {
+  const value = formatInteger(n);
+  if (format === 'parenthetical') {
+    return `(n = ${value})`;
+  }
+  return `N = ${value}`;
 }
 
 export function parseCount(text: string): number | null {

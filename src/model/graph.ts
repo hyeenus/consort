@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import {
   AppSettings,
   BoxNode,
+  CountFormat,
   ExclusionBox,
   ExclusionReason,
   GraphState,
@@ -271,7 +272,7 @@ export function getParentId(graph: GraphState, nodeId: NodeId): NodeId | undefin
   return Object.values(graph.intervals).find((interval) => interval.childId === nodeId)?.parentId;
 }
 
-function layoutGraphInPlace(graph: GraphState): void {
+function layoutGraphInPlace(graph: GraphState, countFormat: CountFormat = 'upper'): void {
   Object.values(graph.nodes).forEach((node) => {
     if (!Array.isArray(node.childIds)) {
       node.childIds = [];
@@ -279,7 +280,7 @@ function layoutGraphInPlace(graph: GraphState): void {
       node.childIds = node.childIds.filter((childId) => graph.nodes[childId]);
     }
   });
-  const { order } = layoutTree(graph.nodes, graph.startNodeId);
+  const { order } = layoutTree(graph.nodes, graph.startNodeId, countFormat);
   (graph as Record<string, unknown>).__order = order;
 }
 
@@ -369,7 +370,7 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
     }
   });
 
-  layoutGraphInPlace(cloned);
+  layoutGraphInPlace(cloned, settings.countFormat);
   return cloned;
 }
 

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import classNames from 'classnames';
-import { GraphState, AppSettings, Interval } from '../model/types';
+import { GraphState, AppSettings, Interval, CountFormat } from '../model/types';
 import { orderNodes } from '../model/graph';
 import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
 import {
@@ -26,8 +26,8 @@ function nodeWidth(node: GraphState['nodes'][string]): number {
   return (node as unknown as { __layoutWidth?: number }).__layoutWidth ?? BOX_WIDTH;
 }
 
-function nodeHeight(node: GraphState['nodes'][string]): number {
-  return (node as unknown as { __layoutHeight?: number }).__layoutHeight ?? computeNodeHeight(node);
+function nodeHeight(node: GraphState['nodes'][string], countFormat: CountFormat): number {
+  return (node as unknown as { __layoutHeight?: number }).__layoutHeight ?? computeNodeHeight(node, countFormat);
 }
 
 interface CanvasMetrics {
@@ -55,7 +55,7 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
     const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
     nodesOrdered.forEach((node) => {
       const width = nodeWidth(node);
-      const height = nodeHeight(node);
+      const height = nodeHeight(node, settings.countFormat);
       const center = node.position.x;
       const halfWidth = width / 2;
       const top = node.position.y;
@@ -74,7 +74,7 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
       verticalOffset: CANVAS_MARGIN / 2,
       minX,
     };
-  }, [nodesOrdered]);
+  }, [nodesOrdered, settings.countFormat]);
 
 const intervalEntries = useMemo(() => Object.values(graph.intervals), [graph.intervals]);
 
@@ -113,6 +113,7 @@ const intervalEntries = useMemo(() => Object.values(graph.intervals), [graph.int
             onBranch,
             onRemove,
             metrics,
+            settings,
           })
         )}
       </svg>
@@ -143,35 +144,66 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const childCenterX = metrics.centerX + child.position.x;
   const parentTopY = metrics.verticalOffset + parent.position.y;
   const childTopY = metrics.verticalOffset + child.position.y;
-  const parentHeightValue = nodeHeight(parent);
+  const parentHeightValue = nodeHeight(parent, settings.countFormat);
   const parentBottomY = parentTopY + parentHeightValue;
   const childTop = childTopY;
   const isSelected = graph.selectedId === interval.id;
   const stroke = isSelected ? '#0057ff' : '#111';
 
-  const isStraight = Math.abs(parentCenterX - childCenterX) < 0.1;
+  const parentChildren = parent.childIds ?? [];
+  const childIndex = parentChildren.indexOf(child.id);
+  const totalChildren = parentChildren.length;
+  const isBranchChild = totalChildren > 1;
+  const isMiddleChild = childIndex > 0 && childIndex < totalChildren - 1;
+  const allowExclusion = totalChildren <= 2 || !isMiddleChild;
+  const parentWidth = nodeWidth(parent);
+  const childWidth = nodeWidth(child);
+
+  const inheritedSide = (child as unknown as { __branchSide?: 'left' | 'right' }).__branchSide;
+  const determineExclusionSide = (): 'left' | 'right' => {
+    if (inheritedSide) {
+      return inheritedSide;
+    }
+    if (isBranchChild) {
+      const threshold = totalChildren / 2;
+      return childIndex < threshold ? 'left' : 'right';
+    }
+    if (childCenterX < parentCenterX - 0.1) {
+      return 'left';
+    }
+    if (childCenterX > parentCenterX + 0.1) {
+      return 'right';
+    }
+    return 'right';
+  };
+
+  const exclusionSide = determineExclusionSide();
+
+  const isStraight = !isBranchChild || Math.abs(parentCenterX - childCenterX) < 0.1;
+  const gap = Math.max(0, childTop - parentBottomY);
+  const defaultAnchorY = parentBottomY + gap / 2;
+  const safeTop = parentBottomY + 24;
+  const safeBottom = childTop - 24;
+  const deltaCenterY = Math.max(safeTop, Math.min(defaultAnchorY, safeBottom));
   let path = '';
   let anchorX = parentCenterX;
-  let anchorY = parentBottomY + (childTop - parentBottomY) / 2;
-  let deltaOffsetX = 0;
-  let deltaOffsetY = 28;
+  let anchorY = defaultAnchorY;
+  let deltaX = parentCenterX;
+  const deltaY = deltaCenterY;
 
   if (isStraight) {
     path = `M ${parentCenterX} ${parentBottomY} L ${childCenterX} ${childTop}`;
-    deltaOffsetX = 0;
-    deltaOffsetY = 36;
+    const deltaSide = exclusionSide === 'left' ? 'right' : 'left';
+    const horizontalOffset = Math.max(parentWidth, childWidth) / 2 + 56;
+    const multiplier = deltaSide === 'right' ? 1 : -1;
+    deltaX = parentCenterX + multiplier * horizontalOffset;
   } else {
-    const junctionY = parentBottomY + (childTop - parentBottomY) / 2;
+    const junctionY = defaultAnchorY;
     path = `M ${parentCenterX} ${parentBottomY} L ${parentCenterX} ${junctionY} L ${childCenterX} ${junctionY} L ${childCenterX} ${childTop}`;
-    anchorX = parentCenterX;
+    anchorX = childCenterX;
     anchorY = junctionY;
-    deltaOffsetX = childCenterX > parentCenterX ? 48 : -48;
-    deltaOffsetY = 28;
+    deltaX = (parentCenterX + childCenterX) / 2;
   }
-
-  const deltaX = anchorX + deltaOffsetX;
-  const deltaY = anchorY - deltaOffsetY;
-  const allowExclusion = (parent.childIds ?? []).length <= 2;
 
   return (
     <g
@@ -195,7 +227,8 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
         allowExclusion,
         anchor: { x: anchorX, y: anchorY },
         showArrow: shouldShowArrow(settings, interval),
-        childToRight: childCenterX >= parentCenterX,
+        side: exclusionSide,
+        countFormat: settings.countFormat,
       })}
     </g>
   );
@@ -209,16 +242,17 @@ interface RenderNodeProps {
   onBranch: (nodeId: string) => void;
   onRemove: (nodeId: string) => void;
   metrics: CanvasMetrics;
+  settings: AppSettings;
 }
 
-function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, metrics }: RenderNodeProps) {
+function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, metrics, settings }: RenderNodeProps) {
   const nodeCenterX = metrics.centerX + node.position.x;
   const width = nodeWidth(node);
-  const boxHeight = nodeHeight(node);
+  const boxHeight = nodeHeight(node, settings.countFormat);
   const x = nodeCenterX - width / 2;
   const y = metrics.verticalOffset + node.position.y;
   const isSelected = graph.selectedId === node.id;
-  const displayLines = getNodeDisplayLines(node);
+  const displayLines = getNodeDisplayLines(node, settings.countFormat);
   const isRoot = graph.startNodeId === node.id;
 
   const buttonSize = 28;
@@ -309,10 +343,11 @@ interface RenderExclusionProps {
   allowExclusion: boolean;
   anchor: { x: number; y: number };
   showArrow: boolean;
-  childToRight: boolean;
+  side: 'left' | 'right';
+  countFormat: CountFormat;
 }
 
-function renderExclusion({ interval, onSelect, isSelected, allowExclusion, anchor, showArrow, childToRight }: RenderExclusionProps) {
+function renderExclusion({ interval, onSelect, isSelected, allowExclusion, anchor, showArrow, side, countFormat }: RenderExclusionProps) {
   if (!allowExclusion) {
     return null;
   }
@@ -321,12 +356,12 @@ function renderExclusion({ interval, onSelect, isSelected, allowExclusion, ancho
     total: null,
     reasons: [],
   };
-  const lines = getExclusionDisplayLines(exclusion);
+  const lines = getExclusionDisplayLines(exclusion, countFormat);
   if (!lines.length) {
     return null;
   }
 
-  const isLeft = !childToRight;
+  const isLeft = side === 'left';
   const highlightStroke = isSelected ? '#0057ff' : '#111';
   const strokeColor = '#111';
 
@@ -335,7 +370,7 @@ function renderExclusion({ interval, onSelect, isSelected, allowExclusion, ancho
   const lineEndX = isLeft ? lineStartX - EXCLUSION_OFFSET_X : lineStartX + EXCLUSION_OFFSET_X;
   const boxX = isLeft ? lineEndX - EXCLUSION_WIDTH : lineEndX;
 
-  const exclusionHeight = computeExclusionHeight(exclusion);
+  const exclusionHeight = computeExclusionHeight(exclusion, countFormat);
   const boxY = lineStartY - exclusionHeight / 2;
   const lineTargetX = isLeft ? lineEndX : boxX;
 
@@ -389,7 +424,8 @@ function renderCenteredLines(
   return (
     <text x={centerX} y={startY} className={classes.textClass} textAnchor="middle">
       {sanitized.map((line, index) => {
-        const isCountLine = index === sanitized.length - 1 && line.startsWith('N =');
+        const isCountLine =
+          index === sanitized.length - 1 && (line.startsWith('N =') || line.startsWith('(n =') || line.startsWith('(N ='));
         return (
           <tspan
             key={index}

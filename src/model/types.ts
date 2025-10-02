@@ -42,9 +42,12 @@ export interface GraphState {
   selectedId?: string;
 }
 
+export type CountFormat = 'upper' | 'parenthetical';
+
 export interface AppSettings {
   autoCalc: boolean;
   arrowsGlobal: boolean;
+  countFormat: CountFormat;
 }
 
 export interface PersistedProject {
