@@ -20,6 +20,7 @@ export const App: React.FC = () => {
     toggleAutoCalc,
     toggleArrowsGlobal,
     toggleCountFormat,
+    toggleFreeEdit,
     undo,
     redo,
     removeNode,
@@ -121,6 +122,7 @@ export const App: React.FC = () => {
         onToggleAutoCalc={toggleAutoCalc}
         onToggleArrows={toggleArrowsGlobal}
         onToggleCountFormat={toggleCountFormat}
+        onToggleFreeEdit={toggleFreeEdit}
         onUndo={undo}
         onRedo={redo}
         onExportSvg={() => {

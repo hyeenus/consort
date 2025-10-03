@@ -9,6 +9,7 @@ export interface BoxNode {
   column: number;
   autoLocked: boolean;
   childIds: NodeId[];
+  countOverride?: string | null;
 }
 
 export type ExclusionReasonKind = 'user' | 'auto';
@@ -18,12 +19,14 @@ export interface ExclusionReason {
   label: string;
   n: number | null;
   kind: ExclusionReasonKind;
+  countOverride?: string | null;
 }
 
 export interface ExclusionBox {
   label: string;
   total: number | null;
   reasons: ExclusionReason[];
+  totalOverride?: string | null;
 }
 
 export interface Interval {
@@ -48,6 +51,7 @@ export interface AppSettings {
   autoCalc: boolean;
   arrowsGlobal: boolean;
   countFormat: CountFormat;
+  freeEdit: boolean;
 }
 
 export interface PersistedProject {

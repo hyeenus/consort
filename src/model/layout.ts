@@ -12,6 +12,10 @@ const EXCLUSION_VERTICAL_PADDING = 32;
 const NODE_MAX_CHARS = 26;
 const EXCLUSION_MAX_CHARS = 22;
 
+interface DisplayOptions {
+  freeEdit?: boolean;
+}
+
 function splitLongWord(word: string, maxChars: number): string[] {
   if (word.length <= maxChars) {
     return [word];
@@ -61,14 +65,26 @@ export function wrapTextLines(lines: string[], maxChars: number): string[] {
   return wrapped.length ? wrapped : [''];
 }
 
-export function getNodeDisplayLines(node: BoxNode, countFormat: CountFormat = 'upper'): string[] {
+export function getNodeDisplayLines(
+  node: BoxNode,
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
+): string[] {
   const baseLines = node.textLines.length ? node.textLines : [''];
   const wrappedContent = wrapTextLines(baseLines, NODE_MAX_CHARS);
-  return [...wrappedContent, formatCount(node.n, countFormat)];
+  const countLine =
+    options.freeEdit && node.countOverride !== undefined && node.countOverride !== null
+      ? node.countOverride
+      : formatCount(node.n, countFormat);
+  return [...wrappedContent, countLine];
 }
 
-export function computeNodeHeight(node: BoxNode, countFormat: CountFormat = 'upper'): number {
-  const totalLines = getNodeDisplayLines(node, countFormat).length;
+export function computeNodeHeight(
+  node: BoxNode,
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
+): number {
+  const totalLines = getNodeDisplayLines(node, countFormat, options).length;
   return Math.max(NODE_MIN_HEIGHT, totalLines * LINE_HEIGHT + NODE_VERTICAL_PADDING);
 }
 
@@ -79,38 +95,67 @@ function formatReasonValue(value: number | null): string {
   return formatInteger(value);
 }
 
-function getVisibleReasons(exclusion?: ExclusionBox): ExclusionReason[] {
+function getVisibleReasons(exclusion: ExclusionBox | undefined, options: DisplayOptions): ExclusionReason[] {
   const reasons = exclusion?.reasons ?? [];
   return reasons.filter((reason) => {
     if (reason.kind === 'auto') {
+      if (options.freeEdit && reason.countOverride != null) {
+        return reason.countOverride.trim().length > 0;
+      }
       return reason.n != null && reason.n !== 0;
     }
     return true;
   });
 }
 
-export function getExclusionDisplayLines(exclusion?: ExclusionBox, countFormat: CountFormat = 'upper'): string[] {
+export function getExclusionDisplayLines(
+  exclusion: ExclusionBox | undefined,
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
+): string[] {
   const label = exclusion?.label ?? 'Excluded';
-  const visibleReasons = getVisibleReasons(exclusion);
+  const visibleReasons = getVisibleReasons(exclusion, options);
+  const totalLine =
+    options.freeEdit && exclusion?.totalOverride !== undefined && exclusion.totalOverride !== null
+      ? exclusion.totalOverride
+      : formatCount(exclusion?.total ?? null, countFormat);
   if (!visibleReasons.length) {
+    if (options.freeEdit) {
+      const hasOverride = exclusion?.totalOverride != null && exclusion.totalOverride.trim().length > 0;
+      const hasNumeric = exclusion?.total != null && exclusion.total !== 0;
+      if (!hasOverride && !hasNumeric) {
+        return [];
+      }
+      return [label, totalLine];
+    }
     if (exclusion?.total == null || exclusion.total === 0) {
       return [];
     }
-    return [label, formatCount(exclusion.total, countFormat)];
+    return [label, totalLine];
   }
 
   const lines: string[] = [label];
   visibleReasons.forEach((reason) => {
     const prefix = reason.label ? `${reason.label}:` : '—:';
-    const wrapped = wrapTextLines([`${prefix} ${formatReasonValue(reason.n ?? null)}`], EXCLUSION_MAX_CHARS);
+    const valueText =
+      options.freeEdit && reason.countOverride !== undefined && reason.countOverride !== null
+        ? reason.countOverride
+        : formatReasonValue(reason.n ?? null);
+    const wrapped = wrapTextLines([`${prefix} ${valueText}`], EXCLUSION_MAX_CHARS);
     lines.push(...wrapped);
   });
+
+  lines.push(totalLine);
 
   return lines.length ? lines : [label];
 }
 
-export function computeExclusionHeight(exclusion?: ExclusionBox, countFormat: CountFormat = 'upper'): number {
-  const totalLines = getExclusionDisplayLines(exclusion, countFormat).length;
+export function computeExclusionHeight(
+  exclusion: ExclusionBox | undefined,
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
+): number {
+  const totalLines = getExclusionDisplayLines(exclusion, countFormat, options).length;
   return Math.max(EXCLUSION_MIN_HEIGHT, totalLines * LINE_HEIGHT + EXCLUSION_VERTICAL_PADDING);
 }
 
@@ -121,8 +166,13 @@ function ensureChildIds(node: BoxNode): NodeId[] {
   return node.childIds;
 }
 
-export function getNodeDimensions(node: BoxNode, parent?: BoxNode, countFormat: CountFormat = 'upper'): { width: number; height: number } {
-  const baseHeight = computeNodeHeight(node, countFormat);
+export function getNodeDimensions(
+  node: BoxNode,
+  parent: BoxNode | undefined,
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
+): { width: number; height: number } {
+  const baseHeight = computeNodeHeight(node, countFormat, options);
   if (parent && (parent.childIds?.length ?? 0) > 1) {
     const parentWidth = (parent as unknown as { __layoutWidth?: number }).__layoutWidth;
     const width = Math.min(parentWidth ?? BOX_WIDTH, BOX_WIDTH);
@@ -136,7 +186,8 @@ type BranchSide = 'left' | 'right' | undefined;
 export function layoutTree(
   nodes: Record<NodeId, BoxNode>,
   startNodeId: NodeId | null,
-  countFormat: CountFormat = 'upper'
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
 ): { order: NodeId[] } {
   if (!startNodeId || !nodes[startNodeId]) {
     return { order: [] };
@@ -150,7 +201,7 @@ export function layoutTree(
       return 0;
     }
     const children = ensureChildIds(node);
-    const { width: nodeWidth } = getNodeDimensions(node, parentNode, countFormat);
+    const { width: nodeWidth } = getNodeDimensions(node, parentNode, countFormat, options);
     if (!children.length) {
       widths.set(nodeId, nodeWidth);
       return nodeWidth;
@@ -182,7 +233,7 @@ export function layoutTree(
       return;
     }
     ensureChildIds(node);
-    const { width: nodeWidth, height: nodeHeight } = getNodeDimensions(node, parentNode, countFormat);
+    const { width: nodeWidth, height: nodeHeight } = getNodeDimensions(node, parentNode, countFormat, options);
     (node as unknown as { __layoutWidth?: number; __layoutHeight?: number }).__layoutWidth = nodeWidth;
     (node as unknown as { __layoutWidth?: number; __layoutHeight?: number }).__layoutHeight = nodeHeight;
     (node as unknown as { __branchSide?: BranchSide }).__branchSide = inheritedSide;
