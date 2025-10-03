@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../state/useStore';
 import { getSelectionKind } from '../model/graph';
 import { GraphState, AppSettings, ExclusionReasonKind } from '../model/types';
-import { formatCount, parseCount } from '../model/numbers';
+import { formatCount, formatInteger, parseCount } from '../model/numbers';
 
 interface ReasonDraft {
   id: string;
@@ -60,7 +60,11 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
       }
       const nextText = node.textLines.join('\n');
       setTextValue((current) => (current === nextText ? current : nextText));
-      const nextCount = node.n != null ? String(node.n) : '';
+      const nextCount = settings.freeEdit
+        ? node.countOverride ?? formatCount(node.n, settings.countFormat)
+        : node.n != null
+        ? String(node.n)
+        : '';
       setCountValue((current) => (current === nextCount ? current : nextCount));
       return;
     }
@@ -74,15 +78,31 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
       const nextLabel = exclusion.label ?? 'Excluded';
       setExclusionLabel((current) => (current === nextLabel ? current : nextLabel));
 
-      const nextExcludedCount = exclusion.total != null ? String(exclusion.total) : '';
+      const nextExcludedCount = settings.freeEdit
+        ? exclusion.totalOverride ?? formatCount(exclusion.total, settings.countFormat)
+        : exclusion.total != null
+        ? String(exclusion.total)
+        : '';
       setExclusionCount((current) => (current === nextExcludedCount ? current : nextExcludedCount));
 
       const nextDrafts = (exclusion.reasons ?? [])
-        .filter((reason) => !(reason.kind === 'auto' && (!reason.n || reason.n === 0)))
+        .filter((reason) => {
+          if (!settings.freeEdit) {
+            return !(reason.kind === 'auto' && (!reason.n || reason.n === 0));
+          }
+          if (reason.kind === 'auto') {
+            return Boolean(reason.countOverride && reason.countOverride.trim().length > 0);
+          }
+          return true;
+        })
         .map((reason) => ({
           id: reason.id,
           label: reason.label,
-          count: reason.n != null ? String(reason.n) : '',
+          count: settings.freeEdit
+            ? reason.countOverride ?? (reason.n != null ? formatInteger(reason.n) : '—')
+            : reason.n != null
+            ? String(reason.n)
+            : '',
           kind: reason.kind,
         }));
 
@@ -102,7 +122,7 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
       setExclusionCount('');
       setReasonDrafts([]);
     }
-  }, [selectionKind, selectedId, nodes, intervals, isEditingReasons]);
+  }, [selectionKind, selectedId, nodes, intervals, isEditingReasons, settings]);
 
   useEffect(() => {
     if (focusSignal > 0 && firstFieldRef.current) {
@@ -150,12 +170,21 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
                 firstFieldRef.current = element;
               }
             }}
-            type="number"
+            type={settings.freeEdit ? 'text' : 'number'}
+            inputMode={settings.freeEdit ? undefined : 'numeric'}
             value={countValue}
             onChange={(event) => setCountValue(event.target.value)}
-            onBlur={() => updateNodeCount(selectedId, parseCount(countValue))}
+            onBlur={() =>
+              updateNodeCount(
+                selectedId,
+                parseCount(countValue),
+                settings.freeEdit ? countValue : undefined
+              )
+            }
           />
-          <small className="hint">Shown as {formatCount(parseCount(countValue), settings.countFormat)}</small>
+          {!settings.freeEdit ? (
+            <small className="hint">Shown as {formatCount(parseCount(countValue), settings.countFormat)}</small>
+          ) : null}
         </label>
       </aside>
     );
@@ -185,7 +214,9 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
           <span>Excluded Count</span>
           <input type="text" value={exclusionCount} readOnly />
         </label>
-        <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
+        {!settings.freeEdit ? (
+          <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
+        ) : null}
       </aside>
     );
   }
@@ -211,10 +242,16 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
         <span>Excluded Count</span>
         <input
           type="text"
-          inputMode="numeric"
+          inputMode={settings.freeEdit ? undefined : 'numeric'}
           value={exclusionCount}
           onChange={(event) => setExclusionCount(event.target.value)}
-          onBlur={() => updateExclusionCount(selectedId, parseCount(exclusionCount))}
+          onBlur={() =>
+            updateExclusionCount(
+              selectedId,
+              parseCount(exclusionCount),
+              settings.freeEdit ? exclusionCount : undefined
+            )
+          }
         />
       </label>
       <div className="reasons">
@@ -237,19 +274,28 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
               <span>Count</span>
               <input
                 type="text"
-                inputMode="numeric"
+                inputMode={settings.freeEdit ? undefined : 'numeric'}
                 value={reason.count}
                 onChange={(event) => updateReasonDraftCount(reason.id, event.target.value)}
                 onBlur={() => {
                   const value = getReasonDraftCount(reason.id);
                   setIsEditingReasons(false);
+                  if (settings.freeEdit) {
+                    updateExclusionReasonCount(
+                      selectedId,
+                      reason.id,
+                      parseCount(value),
+                      value
+                    );
+                    return;
+                  }
                   if (reason.kind === 'auto') {
                     return;
                   }
                   updateExclusionReasonCount(selectedId, reason.id, parseCount(value));
                 }}
                 onFocus={() => setIsEditingReasons(true)}
-                readOnly={reason.kind === 'auto'}
+                readOnly={reason.kind === 'auto' && !settings.freeEdit}
               />
             </div>
             {reason.kind === 'user' ? (
@@ -269,7 +315,9 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
           + Add row
         </button>
       </div>
-      <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
+      {!settings.freeEdit ? (
+        <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
+      ) : null}
     </aside>
   );
 };

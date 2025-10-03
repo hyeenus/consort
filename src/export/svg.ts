@@ -21,7 +21,7 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const center = node.position.x;
     const halfWidth = BOX_WIDTH / 2;
     const top = node.position.y;
-    const bottom = top + computeNodeHeight(node, settings.countFormat);
+    const bottom = top + computeNodeHeight(node, settings.countFormat, { freeEdit: settings.freeEdit });
     minX = Math.min(minX, center - halfWidth - exclusionReach);
     maxX = Math.max(maxX, center + halfWidth + exclusionReach);
     maxBottom = Math.max(maxBottom, bottom);
@@ -61,7 +61,7 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const childCenterX = centerX + child.position.x;
     const parentTopY = verticalOffset + parent.position.y;
     const childTopY = verticalOffset + child.position.y;
-    const parentHeight = computeNodeHeight(parent, settings.countFormat);
+    const parentHeight = computeNodeHeight(parent, settings.countFormat, { freeEdit: settings.freeEdit });
     const parentBottomY = parentTopY + parentHeight;
     const childTop = childTopY;
     const showArrow = settings.arrowsGlobal && interval.arrow;
@@ -127,21 +127,12 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
       deltaX = (parentCenterX + childCenterX) / 2;
     }
 
-    if (interval.delta) {
-      const deltaY = deltaCenterY;
-      const label = interval.delta > 0 ? `Δ = +${interval.delta}` : `Δ = ${interval.delta}`;
-      svgParts.push(
-        `<g class="delta-badge"><rect x="${deltaX - 32}" y="${deltaY - 12}" width="64" height="24" rx="12" fill="#d92c2c" />` +
-          `<text x="${deltaX}" y="${deltaY + 4}" fill="#ffffff" font-size="12" font-weight="bold" text-anchor="middle">${label}</text></g>`
-      );
-    }
-
     if (!allowExclusion) {
       return;
     }
 
     const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
-    const exclusionLines = getExclusionDisplayLines(exclusion, settings.countFormat);
+    const exclusionLines = getExclusionDisplayLines(exclusion, settings.countFormat, { freeEdit: settings.freeEdit });
     if (!exclusionLines.length) {
       return;
     }
@@ -149,7 +140,7 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const isLeft = exclusionSide === 'left';
     const lineEndX = isLeft ? anchorX - EXCLUSION_OFFSET_X : anchorX + EXCLUSION_OFFSET_X;
     const boxX = isLeft ? lineEndX - EXCLUSION_WIDTH : lineEndX;
-    const exclusionHeight = computeExclusionHeight(exclusion, settings.countFormat);
+    const exclusionHeight = computeExclusionHeight(exclusion, settings.countFormat, { freeEdit: settings.freeEdit });
     const boxY = anchorY - exclusionHeight / 2;
     const exclusionStartY = boxY + exclusionHeight / 2 - (LINE_HEIGHT * exclusionLines.length) / 2 + 6;
     const lineTargetX = isLeft ? lineEndX : boxX;
@@ -163,7 +154,7 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     );
     exclusionLines.forEach((line, index) => {
       const dy = index === 0 ? 0 : LINE_HEIGHT;
-      const isCountLine = line.startsWith('N =') || line.startsWith('(n =') || line.startsWith('(N =');
+      const isCountLine = index === exclusionLines.length - 1;
       svgParts.push(
         `<tspan x="${boxX + EXCLUSION_WIDTH / 2}" dy="${dy}"${isCountLine ? ' font-weight="600"' : ''}>${escapeText(
           line
@@ -176,11 +167,11 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
   nodesOrdered.forEach((node) => {
     const x = centerX + node.position.x - BOX_WIDTH / 2;
     const y = verticalOffset + node.position.y;
-    const nodeHeight = computeNodeHeight(node, settings.countFormat);
+    const nodeHeight = computeNodeHeight(node, settings.countFormat, { freeEdit: settings.freeEdit });
     svgParts.push(
       `<rect x="${x}" y="${y}" width="${BOX_WIDTH}" height="${nodeHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`
     );
-    const nodeLines = getNodeDisplayLines(node, settings.countFormat);
+    const nodeLines = getNodeDisplayLines(node, settings.countFormat, { freeEdit: settings.freeEdit });
     const totalHeight = LINE_HEIGHT * nodeLines.length;
     const startY = y + nodeHeight / 2 - totalHeight / 2 + 6;
     svgParts.push(`<text x="${x + BOX_WIDTH / 2}" y="${startY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`);

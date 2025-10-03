@@ -78,25 +78,27 @@ function createDefaultExclusion(): ExclusionBox {
 function ensureOtherReason(exclusion: ExclusionBox): void {
   const userReasons = exclusion.reasons.filter((reason) => reason.kind === 'user');
   const existingAuto = exclusion.reasons.find((reason) => reason.kind === 'auto');
-  const createdAuto: ExclusionReason = existingAuto ?? {
-    id: nanoid(),
-    label: 'Other',
-    n: null,
-    kind: 'auto',
-  };
   const sumUser = userReasons.reduce((acc, reason) => acc + (reason.n ?? 0), 0);
   const remainder = exclusion.total != null ? exclusion.total - sumUser : null;
-
-  createdAuto.n = remainder;
+  const shouldShowAuto = userReasons.length > 0 && remainder != null && remainder !== 0;
 
   exclusion.reasons = [...userReasons];
-  if (createdAuto && createdAuto.n != null) {
-    exclusion.reasons.push(createdAuto);
-  } else if (existingAuto && existingAuto.label !== 'Other') {
-    // Preserve custom label even when the remainder is zero.
-    existingAuto.n = remainder;
-    exclusion.reasons.push(existingAuto);
+  if (!shouldShowAuto) {
+    return;
   }
+
+  const autoReason: ExclusionReason = existingAuto ?? {
+    id: nanoid(),
+    label: 'Other',
+    n: remainder,
+    kind: 'auto',
+    countOverride: null,
+  };
+  autoReason.n = remainder;
+  if (!autoReason.label) {
+    autoReason.label = 'Other';
+  }
+  exclusion.reasons.push(autoReason);
 }
 
 function getReason(graph: GraphState, intervalId: IntervalId, reasonId: string): ExclusionReason {
@@ -153,13 +155,21 @@ export function updateNodeText(graph: GraphState, nodeId: NodeId, textLines: str
   return cloned;
 }
 
-export function updateNodeCount(graph: GraphState, nodeId: NodeId, n: number | null): GraphState {
+export function updateNodeCount(
+  graph: GraphState,
+  nodeId: NodeId,
+  n: number | null,
+  override?: string | null
+): GraphState {
   const cloned = cloneGraph(graph);
   const node = cloned.nodes[nodeId];
   if (!node) {
     throw new Error('Node not found');
   }
   node.n = n;
+  if (override !== undefined) {
+    node.countOverride = override;
+  }
   return cloned;
 }
 
@@ -176,7 +186,12 @@ export function updateExclusionLabel(graph: GraphState, intervalId: IntervalId, 
   return cloned;
 }
 
-export function updateExclusionCount(graph: GraphState, intervalId: IntervalId, n: number | null): GraphState {
+export function updateExclusionCount(
+  graph: GraphState,
+  intervalId: IntervalId,
+  n: number | null,
+  override?: string | null
+): GraphState {
   const cloned = cloneGraph(graph);
   const interval = cloned.intervals[intervalId];
   if (!interval) {
@@ -186,6 +201,9 @@ export function updateExclusionCount(graph: GraphState, intervalId: IntervalId, 
     interval.exclusion = createDefaultExclusion();
   }
   interval.exclusion.total = n;
+  if (override !== undefined) {
+    interval.exclusion.totalOverride = override;
+  }
   return cloned;
 }
 
@@ -229,7 +247,8 @@ export function updateExclusionReasonCount(
   graph: GraphState,
   intervalId: IntervalId,
   reasonId: string,
-  value: number | null
+  value: number | null,
+  override?: string | null
 ): GraphState {
   const cloned = cloneGraph(graph);
   const interval = cloned.intervals[intervalId];
@@ -242,6 +261,9 @@ export function updateExclusionReasonCount(
   const reason = interval.exclusion.reasons.find((item) => item.id === reasonId);
   if (!reason) {
     throw new Error('Reason not found');
+  }
+  if (override !== undefined) {
+    reason.countOverride = override;
   }
   if (reason.kind === 'auto') {
     return cloned;
@@ -272,7 +294,11 @@ export function getParentId(graph: GraphState, nodeId: NodeId): NodeId | undefin
   return Object.values(graph.intervals).find((interval) => interval.childId === nodeId)?.parentId;
 }
 
-function layoutGraphInPlace(graph: GraphState, countFormat: CountFormat = 'upper'): void {
+function layoutGraphInPlace(
+  graph: GraphState,
+  countFormat: CountFormat = 'upper',
+  options: { freeEdit?: boolean } = {}
+): void {
   Object.values(graph.nodes).forEach((node) => {
     if (!Array.isArray(node.childIds)) {
       node.childIds = [];
@@ -280,7 +306,7 @@ function layoutGraphInPlace(graph: GraphState, countFormat: CountFormat = 'upper
       node.childIds = node.childIds.filter((childId) => graph.nodes[childId]);
     }
   });
-  const { order } = layoutTree(graph.nodes, graph.startNodeId, countFormat);
+  const { order } = layoutTree(graph.nodes, graph.startNodeId, countFormat, { freeEdit: options.freeEdit });
   (graph as Record<string, unknown>).__order = order;
 }
 
@@ -294,6 +320,14 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
     ensureOtherReason(interval.exclusion);
     intervalMap.set(`${interval.parentId}:${interval.childId}`, interval);
   });
+
+  if (settings.freeEdit) {
+    Object.values(cloned.intervals).forEach((interval) => {
+      interval.delta = 0;
+    });
+    layoutGraphInPlace(cloned, settings.countFormat, { freeEdit: settings.freeEdit });
+    return cloned;
+  }
 
   if (settings.autoCalc) {
     Object.values(cloned.nodes).forEach((node) => {
@@ -370,7 +404,7 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
     }
   });
 
-  layoutGraphInPlace(cloned, settings.countFormat);
+  layoutGraphInPlace(cloned, settings.countFormat, { freeEdit: settings.freeEdit });
   return cloned;
 }
 

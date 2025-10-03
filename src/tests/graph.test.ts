@@ -11,8 +11,8 @@ import {
 } from '../model/graph';
 import { AppSettings } from '../model/types';
 
-const autoSettings: AppSettings = { autoCalc: true, arrowsGlobal: true };
-const unlockedSettings: AppSettings = { autoCalc: false, arrowsGlobal: true };
+const autoSettings: AppSettings = { autoCalc: true, arrowsGlobal: true, countFormat: 'upper', freeEdit: false };
+const unlockedSettings: AppSettings = { autoCalc: false, arrowsGlobal: true, countFormat: 'upper', freeEdit: false };
 
 describe('graph recalculation', () => {
   it('keeps delta balanced when counts align', () => {
