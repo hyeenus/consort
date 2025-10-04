@@ -40,17 +40,23 @@ interface AppStore {
     addNodeBelow: (parentId: NodeId) => void;
     addBranchChild: (parentId: NodeId) => void;
     updateNodeText: (nodeId: NodeId, textLines: string[]) => void;
-    updateNodeCount: (nodeId: NodeId, value: number | null) => void;
+    updateNodeCount: (nodeId: NodeId, value: number | null, override?: string | null) => void;
     updateExclusionLabel: (intervalId: IntervalId, label: string) => void;
-    updateExclusionCount: (intervalId: IntervalId, value: number | null) => void;
+    updateExclusionCount: (intervalId: IntervalId, value: number | null, override?: string | null) => void;
     addExclusionReason: (intervalId: IntervalId) => void;
     updateExclusionReasonLabel: (intervalId: IntervalId, reasonId: string, label: string) => void;
-    updateExclusionReasonCount: (intervalId: IntervalId, reasonId: string, value: number | null) => void;
+    updateExclusionReasonCount: (
+      intervalId: IntervalId,
+      reasonId: string,
+      value: number | null,
+      override?: string | null
+    ) => void;
     removeExclusionReason: (intervalId: IntervalId, reasonId: string) => void;
     removeNode: (nodeId: NodeId) => void;
     toggleAutoCalc: () => void;
     toggleArrowsGlobal: () => void;
     toggleCountFormat: () => void;
+    toggleFreeEdit: () => void;
     toggleArrow: (intervalId: IntervalId) => void;
     selectById: (id: string | undefined) => void;
     navigateSelection: (direction: 'up' | 'down' | 'left' | 'right') => void;
@@ -66,6 +72,7 @@ const defaultSettings: AppSettings = {
   autoCalc: true,
   arrowsGlobal: true,
   countFormat: 'upper',
+  freeEdit: false,
 };
 
 const defaultGraph = recomputeGraph(createInitialGraph(), defaultSettings);
@@ -142,10 +149,15 @@ export const useAppStore = create<AppStore>()(
               };
             });
           },
-          updateNodeCount: (nodeId, value) => {
+          updateNodeCount: (nodeId, value, override) => {
             const prev = cloneSnapshot(get().graph, get().settings);
             set((state) => {
-              const updatedGraph = recomputeGraph(updateNodeCount(state.graph, nodeId, value), state.settings);
+              const updatedGraph = recomputeGraph(
+                updateNodeCount(state.graph, nodeId, value, override, {
+                  skipBranchRebalance: state.settings.freeEdit,
+                }),
+                state.settings
+              );
               return {
                 ...state,
                 graph: updatedGraph,
@@ -164,10 +176,13 @@ export const useAppStore = create<AppStore>()(
               };
             });
           },
-          updateExclusionCount: (intervalId, value) => {
+          updateExclusionCount: (intervalId, value, override) => {
             const prev = cloneSnapshot(get().graph, get().settings);
             set((state) => {
-              const updatedGraph = recomputeGraph(updateExclusionCount(state.graph, intervalId, value), state.settings);
+              const updatedGraph = recomputeGraph(
+                updateExclusionCount(state.graph, intervalId, value, override),
+                state.settings
+              );
               return {
                 ...state,
                 graph: updatedGraph,
@@ -191,11 +206,14 @@ export const useAppStore = create<AppStore>()(
               history: pushHistory(state.history, prev),
             }));
           },
-          updateExclusionReasonCount: (intervalId, reasonId, value) => {
+          updateExclusionReasonCount: (intervalId, reasonId, value, override) => {
             const prev = cloneSnapshot(get().graph, get().settings);
             set((state) => ({
               ...state,
-              graph: recomputeGraph(updateExclusionReasonCount(state.graph, intervalId, reasonId, value), state.settings),
+              graph: recomputeGraph(
+                updateExclusionReasonCount(state.graph, intervalId, reasonId, value, override),
+                state.settings
+              ),
               history: pushHistory(state.history, prev),
             }));
           },
@@ -244,6 +262,19 @@ export const useAppStore = create<AppStore>()(
             set((state) => {
               const nextFormat: CountFormat = state.settings.countFormat === 'upper' ? 'parenthetical' : 'upper';
               const nextSettings: AppSettings = { ...state.settings, countFormat: nextFormat };
+              const updatedGraph = recomputeGraph(state.graph, nextSettings);
+              return {
+                ...state,
+                settings: nextSettings,
+                graph: updatedGraph,
+                history: pushHistory(state.history, prev),
+              };
+            });
+          },
+          toggleFreeEdit: () => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => {
+              const nextSettings: AppSettings = { ...state.settings, freeEdit: !state.settings.freeEdit };
               const updatedGraph = recomputeGraph(state.graph, nextSettings);
               return {
                 ...state,
@@ -350,6 +381,9 @@ export const useAppStore = create<AppStore>()(
           } satisfies AppSettings;
           if (!mergedSettings.countFormat) {
             mergedSettings.countFormat = 'upper';
+          }
+          if (typeof mergedSettings.freeEdit !== 'boolean') {
+            mergedSettings.freeEdit = false;
           }
           return {
             ...currentState,

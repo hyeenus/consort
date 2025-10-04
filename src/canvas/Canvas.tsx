@@ -6,7 +6,7 @@ import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constan
 import {
   computeExclusionHeight,
   computeNodeHeight,
-  getExclusionDisplayLines,
+  getExclusionDisplayContent,
   getNodeDisplayLines,
   LINE_HEIGHT,
 } from '../model/layout';
@@ -26,8 +26,11 @@ function nodeWidth(node: GraphState['nodes'][string]): number {
   return (node as unknown as { __layoutWidth?: number }).__layoutWidth ?? BOX_WIDTH;
 }
 
-function nodeHeight(node: GraphState['nodes'][string], countFormat: CountFormat): number {
-  return (node as unknown as { __layoutHeight?: number }).__layoutHeight ?? computeNodeHeight(node, countFormat);
+function nodeHeight(node: GraphState['nodes'][string], settings: AppSettings): number {
+  return (
+    (node as unknown as { __layoutHeight?: number }).__layoutHeight ??
+    computeNodeHeight(node, settings.countFormat, { freeEdit: settings.freeEdit })
+  );
 }
 
 interface CanvasMetrics {
@@ -55,7 +58,7 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
     const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
     nodesOrdered.forEach((node) => {
       const width = nodeWidth(node);
-      const height = nodeHeight(node, settings.countFormat);
+      const height = nodeHeight(node, settings);
       const center = node.position.x;
       const halfWidth = width / 2;
       const top = node.position.y;
@@ -144,7 +147,7 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const childCenterX = metrics.centerX + child.position.x;
   const parentTopY = metrics.verticalOffset + parent.position.y;
   const childTopY = metrics.verticalOffset + child.position.y;
-  const parentHeightValue = nodeHeight(parent, settings.countFormat);
+  const parentHeightValue = nodeHeight(parent, settings);
   const parentBottomY = parentTopY + parentHeightValue;
   const childTop = childTopY;
   const isSelected = graph.selectedId === interval.id;
@@ -154,8 +157,34 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const childIndex = parentChildren.indexOf(child.id);
   const totalChildren = parentChildren.length;
   const isBranchChild = totalChildren > 1;
-  const isMiddleChild = childIndex > 0 && childIndex < totalChildren - 1;
-  const allowExclusion = totalChildren <= 2 || !isMiddleChild;
+  const hasVisibleExclusion = (() => {
+    const exclusion = interval.exclusion;
+    if (!exclusion) {
+      return false;
+    }
+    if (exclusion.label && exclusion.label.trim() && exclusion.label.trim() !== 'Excluded') {
+      return true;
+    }
+    if (exclusion.totalOverride && exclusion.totalOverride.trim().length > 0) {
+      return true;
+    }
+    if (exclusion.total != null && exclusion.total !== 0) {
+      return true;
+    }
+    if (exclusion.reasons.some((reason) => {
+      if (reason.kind === 'user') {
+        return true;
+      }
+      if (reason.countOverride && reason.countOverride.trim().length > 0) {
+        return true;
+      }
+      return reason.n != null && reason.n !== 0;
+    })) {
+      return true;
+    }
+    return false;
+  })();
+  const allowExclusion = totalChildren <= 1 || hasVisibleExclusion;
   const parentWidth = nodeWidth(parent);
   const childWidth = nodeWidth(child);
 
@@ -219,7 +248,7 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
         strokeWidth={isSelected ? 3 : 2}
         markerEnd={shouldShowArrow(settings, interval) ? 'url(#arrowhead)' : undefined}
       />
-      {renderDeltaBadge(interval, deltaX, deltaY)}
+      {renderDeltaBadge(interval, deltaX, deltaY, settings.freeEdit)}
       {renderExclusion({
         interval,
         onSelect,
@@ -229,6 +258,7 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
         showArrow: shouldShowArrow(settings, interval),
         side: exclusionSide,
         countFormat: settings.countFormat,
+        freeEdit: settings.freeEdit,
       })}
     </g>
   );
@@ -248,11 +278,11 @@ interface RenderNodeProps {
 function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, metrics, settings }: RenderNodeProps) {
   const nodeCenterX = metrics.centerX + node.position.x;
   const width = nodeWidth(node);
-  const boxHeight = nodeHeight(node, settings.countFormat);
+  const boxHeight = nodeHeight(node, settings);
   const x = nodeCenterX - width / 2;
   const y = metrics.verticalOffset + node.position.y;
   const isSelected = graph.selectedId === node.id;
-  const displayLines = getNodeDisplayLines(node, settings.countFormat);
+  const displayLines = getNodeDisplayLines(node, settings.countFormat, { freeEdit: settings.freeEdit });
   const isRoot = graph.startNodeId === node.id;
 
   const buttonSize = 28;
@@ -321,8 +351,8 @@ function renderNode({ node, graph, onSelect, onCreateBelow, onBranch, onRemove, 
   );
 }
 
-function renderDeltaBadge(interval: Interval, x: number, y: number) {
-  if (!interval.delta) {
+function renderDeltaBadge(interval: Interval, x: number, y: number, freeEdit: boolean) {
+  if (!interval.delta || freeEdit) {
     return null;
   }
   const label = interval.delta > 0 ? `Δ = +${interval.delta}` : `Δ = ${interval.delta}`;
@@ -345,9 +375,20 @@ interface RenderExclusionProps {
   showArrow: boolean;
   side: 'left' | 'right';
   countFormat: CountFormat;
+  freeEdit: boolean;
 }
 
-function renderExclusion({ interval, onSelect, isSelected, allowExclusion, anchor, showArrow, side, countFormat }: RenderExclusionProps) {
+function renderExclusion({
+  interval,
+  onSelect,
+  isSelected,
+  allowExclusion,
+  anchor,
+  showArrow,
+  side,
+  countFormat,
+  freeEdit,
+}: RenderExclusionProps) {
   if (!allowExclusion) {
     return null;
   }
@@ -356,7 +397,8 @@ function renderExclusion({ interval, onSelect, isSelected, allowExclusion, ancho
     total: null,
     reasons: [],
   };
-  const lines = getExclusionDisplayLines(exclusion, countFormat);
+  const display = getExclusionDisplayContent(exclusion, countFormat, { freeEdit });
+  const lines = display.lines;
   if (!lines.length) {
     return null;
   }
@@ -370,9 +412,14 @@ function renderExclusion({ interval, onSelect, isSelected, allowExclusion, ancho
   const lineEndX = isLeft ? lineStartX - EXCLUSION_OFFSET_X : lineStartX + EXCLUSION_OFFSET_X;
   const boxX = isLeft ? lineEndX - EXCLUSION_WIDTH : lineEndX;
 
-  const exclusionHeight = computeExclusionHeight(exclusion, countFormat);
+  const exclusionHeight = computeExclusionHeight(exclusion, countFormat, { freeEdit });
   const boxY = lineStartY - exclusionHeight / 2;
   const lineTargetX = isLeft ? lineEndX : boxX;
+
+  const textOptions: { textClass: string; countClass?: string; countLineIndex?: number } =
+    display.totalLineIndex != null
+      ? { textClass: 'exclusion-text', countClass: 'node-count', countLineIndex: display.totalLineIndex }
+      : { textClass: 'exclusion-text' };
 
   return (
     <g
@@ -402,10 +449,7 @@ function renderExclusion({ interval, onSelect, isSelected, allowExclusion, ancho
         stroke={highlightStroke}
         strokeWidth={isSelected ? 3 : 2}
       />
-      {renderCenteredLines(lines, boxX + EXCLUSION_WIDTH / 2, boxY, exclusionHeight, {
-        textClass: 'exclusion-text',
-        countClass: 'node-count',
-      })}
+      {renderCenteredLines(lines, boxX + EXCLUSION_WIDTH / 2, boxY, exclusionHeight, textOptions)}
     </g>
   );
 }
@@ -415,7 +459,7 @@ function renderCenteredLines(
   centerX: number,
   topY: number,
   containerHeight: number,
-  classes: { textClass: string; countClass?: string }
+  classes: { textClass: string; countClass?: string; countLineIndex?: number }
 ) {
   const sanitized = lines.length ? lines : [''];
   const totalHeight = LINE_HEIGHT * sanitized.length;
@@ -424,8 +468,11 @@ function renderCenteredLines(
   return (
     <text x={centerX} y={startY} className={classes.textClass} textAnchor="middle">
       {sanitized.map((line, index) => {
-        const isCountLine =
-          index === sanitized.length - 1 && (line.startsWith('N =') || line.startsWith('(n =') || line.startsWith('(N ='));
+        const countIndex =
+          classes.countClass !== undefined
+            ? classes.countLineIndex ?? sanitized.length - 1
+            : undefined;
+        const isCountLine = countIndex !== undefined && index === countIndex;
         return (
           <tspan
             key={index}
