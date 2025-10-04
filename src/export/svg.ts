@@ -4,7 +4,7 @@ import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constan
 import {
   computeExclusionHeight,
   computeNodeHeight,
-  getExclusionDisplayLines,
+  getExclusionDisplayContent,
   getNodeDisplayLines,
   LINE_HEIGHT,
 } from '../model/layout';
@@ -72,9 +72,6 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const isBranchChild = totalChildren > 1;
     const isMiddleChild = childIndex > 0 && childIndex < totalChildren - 1;
     const allowExclusion = totalChildren <= 2 || !isMiddleChild;
-    const parentWidth = (parent as unknown as { __layoutWidth?: number }).__layoutWidth ?? BOX_WIDTH;
-    const childWidth = (child as unknown as { __layoutWidth?: number }).__layoutWidth ?? BOX_WIDTH;
-
     const inheritedSide = (child as unknown as { __branchSide?: 'left' | 'right' }).__branchSide;
     const determineExclusionSide = (): 'left' | 'right' => {
       if (inheritedSide) {
@@ -98,12 +95,8 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     const isStraight = !isBranchChild || Math.abs(parentCenterX - childCenterX) < 0.1;
     const gap = Math.max(0, childTop - parentBottomY);
     const defaultAnchorY = parentBottomY + gap / 2;
-    const safeTop = parentBottomY + 24;
-    const safeBottom = childTop - 24;
-    const deltaCenterY = Math.max(safeTop, Math.min(defaultAnchorY, safeBottom));
     let anchorX = parentCenterX;
     let anchorY = defaultAnchorY;
-    let deltaX = parentCenterX;
 
     if (isStraight) {
       svgParts.push(
@@ -111,10 +104,6 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
           showArrow ? ' marker-end="url(#arrowhead)"' : ''
         } />`
       );
-      const deltaSide = exclusionSide === 'left' ? 'right' : 'left';
-      const horizontalOffset = Math.max(parentWidth, childWidth) / 2 + 56;
-      const multiplier = deltaSide === 'right' ? 1 : -1;
-      deltaX = parentCenterX + multiplier * horizontalOffset;
     } else {
       const junctionY = defaultAnchorY;
       svgParts.push(
@@ -124,7 +113,6 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
       );
       anchorX = childCenterX;
       anchorY = junctionY;
-      deltaX = (parentCenterX + childCenterX) / 2;
     }
 
     if (!allowExclusion) {
@@ -132,7 +120,10 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     }
 
     const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
-    const exclusionLines = getExclusionDisplayLines(exclusion, settings.countFormat, { freeEdit: settings.freeEdit });
+    const exclusionDisplay = getExclusionDisplayContent(exclusion, settings.countFormat, {
+      freeEdit: settings.freeEdit,
+    });
+    const exclusionLines = exclusionDisplay.lines;
     if (!exclusionLines.length) {
       return;
     }
@@ -152,9 +143,10 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
       `<rect x="${boxX}" y="${boxY}" width="${EXCLUSION_WIDTH}" height="${exclusionHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
       `<text x="${boxX + EXCLUSION_WIDTH / 2}" y="${exclusionStartY}" fill="#111111" font-family="system-ui, sans-serif" font-size="16" text-anchor="middle">`
     );
+    const countLineIndex = exclusionDisplay.totalLineIndex;
     exclusionLines.forEach((line, index) => {
       const dy = index === 0 ? 0 : LINE_HEIGHT;
-      const isCountLine = index === exclusionLines.length - 1;
+      const isCountLine = countLineIndex != null && index === countLineIndex;
       svgParts.push(
         `<tspan x="${boxX + EXCLUSION_WIDTH / 2}" dy="${dy}"${isCountLine ? ' font-weight="600"' : ''}>${escapeText(
           line
