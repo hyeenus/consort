@@ -152,7 +152,12 @@ export const useAppStore = create<AppStore>()(
           updateNodeCount: (nodeId, value, override) => {
             const prev = cloneSnapshot(get().graph, get().settings);
             set((state) => {
-              const updatedGraph = recomputeGraph(updateNodeCount(state.graph, nodeId, value, override), state.settings);
+              const updatedGraph = recomputeGraph(
+                updateNodeCount(state.graph, nodeId, value, override, {
+                  skipBranchRebalance: state.settings.freeEdit,
+                }),
+                state.settings
+              );
               return {
                 ...state,
                 graph: updatedGraph,

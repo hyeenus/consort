@@ -157,8 +157,34 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const childIndex = parentChildren.indexOf(child.id);
   const totalChildren = parentChildren.length;
   const isBranchChild = totalChildren > 1;
-  const isMiddleChild = childIndex > 0 && childIndex < totalChildren - 1;
-  const allowExclusion = totalChildren <= 2 || !isMiddleChild;
+  const hasVisibleExclusion = (() => {
+    const exclusion = interval.exclusion;
+    if (!exclusion) {
+      return false;
+    }
+    if (exclusion.label && exclusion.label.trim() && exclusion.label.trim() !== 'Excluded') {
+      return true;
+    }
+    if (exclusion.totalOverride && exclusion.totalOverride.trim().length > 0) {
+      return true;
+    }
+    if (exclusion.total != null && exclusion.total !== 0) {
+      return true;
+    }
+    if (exclusion.reasons.some((reason) => {
+      if (reason.kind === 'user') {
+        return true;
+      }
+      if (reason.countOverride && reason.countOverride.trim().length > 0) {
+        return true;
+      }
+      return reason.n != null && reason.n !== 0;
+    })) {
+      return true;
+    }
+    return false;
+  })();
+  const allowExclusion = totalChildren <= 1 || hasVisibleExclusion;
   const parentWidth = nodeWidth(parent);
   const childWidth = nodeWidth(child);
 

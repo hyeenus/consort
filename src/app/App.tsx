@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useAppStore } from '../state/useStore';
 import { Canvas } from '../canvas/Canvas';
 import { Inspector } from '../ui/Inspector';
@@ -15,7 +15,6 @@ export const App: React.FC = () => {
   const {
     addNodeBelow,
     addBranchChild,
-    navigateSelection,
     selectById,
     toggleAutoCalc,
     toggleArrowsGlobal,
@@ -28,84 +27,6 @@ export const App: React.FC = () => {
     importSnapshot,
     reset,
   } = useAppStore((state) => state.actions);
-
-  const [focusSignal, triggerFocus] = useState(0);
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const meta = event.metaKey || event.ctrlKey;
-      const shift = event.shiftKey;
-      const key = event.key;
-      const selectionKind = getSelectionKind(graph);
-      const selectedId = graph.selectedId;
-
-      if (meta && key.toLowerCase() === 'z') {
-        event.preventDefault();
-        if (shift) {
-          redo();
-        } else {
-          undo();
-        }
-        return;
-      }
-
-      if (meta && key === 'ArrowDown') {
-        if (selectionKind === 'node' && selectedId) {
-          event.preventDefault();
-          addNodeBelow(selectedId);
-        }
-        return;
-      }
-
-      if (meta && key === 'ArrowRight') {
-        if (selectionKind === 'node' && selectedId) {
-          const intervals = Object.values(graph.intervals).find((interval) => interval.parentId === selectedId);
-          if (intervals) {
-            event.preventDefault();
-            selectById(intervals.id);
-          }
-        }
-        return;
-      }
-
-      if (key === 'ArrowUp') {
-        event.preventDefault();
-        navigateSelection('up');
-        return;
-      }
-      if (key === 'ArrowDown') {
-        event.preventDefault();
-        navigateSelection('down');
-        return;
-      }
-      if (key === 'ArrowLeft') {
-        event.preventDefault();
-        navigateSelection('left');
-        return;
-      }
-      if (key === 'ArrowRight') {
-        event.preventDefault();
-        navigateSelection('right');
-        return;
-      }
-
-      if (key === 'Enter' || key === 'F2') {
-        event.preventDefault();
-        triggerFocus((value) => value + 1);
-        return;
-      }
-
-      if (key === 'Escape') {
-        event.preventDefault();
-        selectById(undefined);
-        return;
-      }
-
-    };
-
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [graph, navigateSelection, selectById, redo, undo, addNodeBelow]);
 
   return (
     <div className="app-shell">
@@ -176,7 +97,7 @@ export const App: React.FC = () => {
             removeNode(nodeId);
           }}
         />
-        <Inspector graph={graph} settings={settings} focusSignal={focusSignal} />
+        <Inspector graph={graph} settings={settings} />
       </div>
     </div>
   );

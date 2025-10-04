@@ -118,11 +118,13 @@ export function getExclusionDisplayContent(
       ? exclusion.totalOverride
       : formatCount(exclusion?.total ?? null, countFormat);
   const hasTotalOverride = exclusion?.totalOverride != null && exclusion.totalOverride.trim().length > 0;
-  const hasNumericTotal = exclusion?.total != null && exclusion.total !== 0;
+  const totalValue = exclusion?.total ?? null;
+  const hasNumericTotal = totalValue != null && totalValue !== 0;
   const shouldShowTotal = !options.freeEdit || hasTotalOverride || hasNumericTotal;
+  const totalIsZeroOrBlank = (totalValue == null || totalValue === 0) && !hasTotalOverride;
 
   if (!visibleReasons.length) {
-    if (!shouldShowTotal) {
+    if (!shouldShowTotal || totalIsZeroOrBlank) {
       return { lines: [], totalLineIndex: null };
     }
     return { lines: [label, totalLine], totalLineIndex: 1 };
@@ -138,14 +140,13 @@ export function getExclusionDisplayContent(
 
   visibleReasons.forEach((reason) => {
     const baseLabel = reason.label?.trim().length ? reason.label.trim() : '—';
-    wrapTextLines([baseLabel], EXCLUSION_MAX_CHARS).forEach((segment) => {
-      lines.push(segment);
-    });
-
     const hasReasonOverride =
       options.freeEdit && reason.countOverride != null && reason.countOverride.trim().length > 0;
     const countText = hasReasonOverride ? reason.countOverride! : formatCount(reason.n ?? null, countFormat);
-    lines.push(countText);
+    const combinedLine = `${baseLabel}: ${countText}`;
+    wrapTextLines([combinedLine], EXCLUSION_MAX_CHARS).forEach((segment) => {
+      lines.push(segment);
+    });
   });
 
   return { lines, totalLineIndex };

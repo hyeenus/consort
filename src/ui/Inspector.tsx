@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../state/useStore';
 import { getSelectionKind } from '../model/graph';
 import { GraphState, AppSettings, ExclusionReasonKind } from '../model/types';
@@ -14,10 +14,9 @@ interface ReasonDraft {
 interface InspectorProps {
   graph: GraphState;
   settings: AppSettings;
-  focusSignal: number;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSignal }) => {
+export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
   const {
     updateNodeText,
     updateNodeCount,
@@ -30,8 +29,6 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
   } = useAppStore((state) => state.actions);
   const selectionKind = useMemo(() => getSelectionKind(graph), [graph]);
   const selectedId = graph.selectedId;
-  const firstFieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
-
   const [textValue, setTextValue] = useState('');
   const [countValue, setCountValue] = useState('');
   const [exclusionLabel, setExclusionLabel] = useState('');
@@ -124,13 +121,6 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
     }
   }, [selectionKind, selectedId, nodes, intervals, isEditingReasons, settings]);
 
-  useEffect(() => {
-    if (focusSignal > 0 && firstFieldRef.current) {
-      firstFieldRef.current.focus();
-      firstFieldRef.current.select?.();
-    }
-  }, [focusSignal]);
-
   if (!selectedId || !selectionKind) {
     return (
       <aside className="inspector empty">
@@ -145,17 +135,18 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
     if (!node) {
       return null;
     }
+    const commitNodeCount = () =>
+      updateNodeCount(
+        selectedId,
+        parseCount(countValue),
+        settings.freeEdit ? countValue : undefined
+      );
     return (
       <aside className="inspector">
         <h3>Box Details</h3>
         <label className="field">
           <span>Text</span>
           <textarea
-            ref={(element) => {
-              if (element) {
-                firstFieldRef.current = element;
-              }
-            }}
             rows={6}
             value={textValue}
             onChange={(event) => setTextValue(event.target.value)}
@@ -165,22 +156,17 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
         <label className="field">
           <span>Patient Count</span>
           <input
-            ref={(element) => {
-              if (element && !firstFieldRef.current) {
-                firstFieldRef.current = element;
-              }
-            }}
             type={settings.freeEdit ? 'text' : 'number'}
             inputMode={settings.freeEdit ? undefined : 'numeric'}
             value={countValue}
             onChange={(event) => setCountValue(event.target.value)}
-            onBlur={() =>
-              updateNodeCount(
-                selectedId,
-                parseCount(countValue),
-                settings.freeEdit ? countValue : undefined
-              )
-            }
+            onBlur={commitNodeCount}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                commitNodeCount();
+              }
+            }}
           />
           {!settings.freeEdit ? (
             <small className="hint">Shown as {formatCount(parseCount(countValue), settings.countFormat)}</small>
@@ -197,15 +183,13 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
 
   const parentForInterval = graph.nodes[interval.parentId];
   const parentChildren = parentForInterval?.childIds ?? [];
-  const childIndex = parentChildren.indexOf(interval.childId);
-  const allowExclusion =
-    parentChildren.length <= 2 || childIndex === 0 || childIndex === parentChildren.length - 1;
+  const canEditExclusion = parentChildren.length <= 1;
 
-  if (!allowExclusion) {
+  if (!canEditExclusion) {
     return (
       <aside className="inspector">
         <h3>Exclusion Details</h3>
-        <p className="hint">Exclusions are disabled for middle branches when a node has three or more branches.</p>
+        <p className="hint">Branch exclusions update automatically when totals are missing.</p>
         <label className="field">
           <span>Label</span>
           <input type="text" value={exclusionLabel} readOnly />
@@ -221,17 +205,19 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
     );
   }
 
+  const commitExclusionCount = () =>
+    updateExclusionCount(
+      selectedId,
+      parseCount(exclusionCount),
+      settings.freeEdit ? exclusionCount : undefined
+    );
+
   return (
     <aside className="inspector">
       <h3>Exclusion Details</h3>
       <label className="field">
         <span>Label</span>
         <input
-          ref={(element) => {
-            if (element) {
-              firstFieldRef.current = element;
-            }
-          }}
           type="text"
           value={exclusionLabel}
           onChange={(event) => setExclusionLabel(event.target.value)}
@@ -245,19 +231,38 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
           inputMode={settings.freeEdit ? undefined : 'numeric'}
           value={exclusionCount}
           onChange={(event) => setExclusionCount(event.target.value)}
-          onBlur={() =>
-            updateExclusionCount(
-              selectedId,
-              parseCount(exclusionCount),
-              settings.freeEdit ? exclusionCount : undefined
-            )
-          }
+          onBlur={commitExclusionCount}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitExclusionCount();
+            }
+          }}
         />
       </label>
       <div className="reasons">
-        {reasonDrafts.map((reason) => (
-          <div className="reason-row" key={reason.id}>
-            <div className="field compact reason-title">
+        {reasonDrafts.map((reason) => {
+          const commitReasonCount = () => {
+            const value = getReasonDraftCount(reason.id);
+            setIsEditingReasons(false);
+            if (settings.freeEdit) {
+              updateExclusionReasonCount(
+                selectedId,
+                reason.id,
+                parseCount(value),
+                value
+              );
+              return;
+            }
+            if (reason.kind === 'auto') {
+              return;
+            }
+            updateExclusionReasonCount(selectedId, reason.id, parseCount(value));
+          };
+
+          return (
+            <div className="reason-row" key={reason.id}>
+              <div className="field compact reason-title">
               <span>Title</span>
               <input
                 type="text"
@@ -269,42 +274,33 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, focusSign
                   updateExclusionReasonLabel(selectedId, reason.id, getReasonDraftLabel(reason.id));
                 }}
               />
-            </div>
-            <div className="field compact reason-count">
+              </div>
+              <div className="field compact reason-count">
               <span>Count</span>
               <input
                 type="text"
                 inputMode={settings.freeEdit ? undefined : 'numeric'}
                 value={reason.count}
                 onChange={(event) => updateReasonDraftCount(reason.id, event.target.value)}
-                onBlur={() => {
-                  const value = getReasonDraftCount(reason.id);
-                  setIsEditingReasons(false);
-                  if (settings.freeEdit) {
-                    updateExclusionReasonCount(
-                      selectedId,
-                      reason.id,
-                      parseCount(value),
-                      value
-                    );
-                    return;
+                onBlur={commitReasonCount}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitReasonCount();
                   }
-                  if (reason.kind === 'auto') {
-                    return;
-                  }
-                  updateExclusionReasonCount(selectedId, reason.id, parseCount(value));
                 }}
                 onFocus={() => setIsEditingReasons(true)}
                 readOnly={reason.kind === 'auto' && !settings.freeEdit}
               />
+              </div>
+              {reason.kind === 'user' ? (
+                <button type="button" className="remove-reason" onClick={() => removeExclusionReason(selectedId, reason.id)}>
+                  Remove
+                </button>
+              ) : null}
             </div>
-            {reason.kind === 'user' ? (
-              <button type="button" className="remove-reason" onClick={() => removeExclusionReason(selectedId, reason.id)}>
-                Remove
-              </button>
-            ) : null}
-          </div>
-        ))}
+          );
+        })}
         <button
           type="button"
           className="add-reason"

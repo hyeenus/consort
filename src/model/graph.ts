@@ -101,6 +101,68 @@ function ensureOtherReason(exclusion: ExclusionBox): void {
   exclusion.reasons.push(autoReason);
 }
 
+function initializeBranchChildren(graph: GraphState, parent: BoxNode): void {
+  const childIds = parent.childIds ?? [];
+  if (childIds.length < 2) {
+    return;
+  }
+  if (parent.n == null) {
+    return;
+  }
+  const childNodes = childIds
+    .map((childId) => graph.nodes[childId])
+    .filter((node): node is BoxNode => Boolean(node));
+  if (!childNodes.length) {
+    return;
+  }
+  const anyAssigned = childNodes.some((child) => child.n != null);
+  if (anyAssigned) {
+    return;
+  }
+
+  const totalChildren = childNodes.length;
+  const baseShare = Math.floor(parent.n / totalChildren);
+  let remainder = parent.n - baseShare * totalChildren;
+
+  childNodes.forEach((child) => {
+    let value = baseShare;
+    if (remainder > 0) {
+      value += 1;
+      remainder -= 1;
+    }
+    child.n = value;
+  });
+}
+
+function rebalanceBranchAfterUpdate(graph: GraphState, parentId: NodeId, updatedChildId: NodeId): void {
+  const parent = graph.nodes[parentId];
+  if (!parent) {
+    return;
+  }
+  const childIds = parent.childIds ?? [];
+  if (childIds.length !== 2) {
+    return;
+  }
+  if (parent.n == null) {
+    return;
+  }
+  const updatedChild = graph.nodes[updatedChildId];
+  const otherChildId = childIds.find((id) => id !== updatedChildId);
+  if (!updatedChild || !otherChildId) {
+    return;
+  }
+  const otherChild = graph.nodes[otherChildId];
+  if (!otherChild) {
+    return;
+  }
+  const updatedValue = updatedChild.n ?? 0;
+  const remaining = parent.n - updatedValue;
+  otherChild.n = remaining >= 0 ? remaining : 0;
+  if (otherChild.countOverride !== undefined) {
+    otherChild.countOverride = undefined;
+  }
+}
+
 function getReason(graph: GraphState, intervalId: IntervalId, reasonId: string): ExclusionReason {
   const interval = graph.intervals[intervalId];
   if (!interval || !interval.exclusion) {
@@ -159,7 +221,8 @@ export function updateNodeCount(
   graph: GraphState,
   nodeId: NodeId,
   n: number | null,
-  override?: string | null
+  override?: string | null,
+  options: { skipBranchRebalance?: boolean } = {}
 ): GraphState {
   const cloned = cloneGraph(graph);
   const node = cloned.nodes[nodeId];
@@ -169,6 +232,12 @@ export function updateNodeCount(
   node.n = n;
   if (override !== undefined) {
     node.countOverride = override;
+  }
+  if (!options.skipBranchRebalance) {
+    const parentId = getParentId(cloned, nodeId);
+    if (parentId) {
+      rebalanceBranchAfterUpdate(cloned, parentId, nodeId);
+    }
   }
   return cloned;
 }
@@ -314,22 +383,32 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
   const cloned = cloneGraph(graph);
   const intervalMap = new Map<string, Interval>();
   Object.values(cloned.intervals).forEach((interval) => {
-    if (!interval.exclusion) {
-      interval.exclusion = createDefaultExclusion();
+    const parent = cloned.nodes[interval.parentId];
+    const parentChildren = parent?.childIds ?? [];
+    const isBranchInterval = parentChildren.length > 1;
+
+    if (isBranchInterval) {
+      interval.exclusion = undefined;
+    } else {
+      if (!interval.exclusion) {
+        interval.exclusion = createDefaultExclusion();
+      }
+      ensureOtherReason(interval.exclusion);
     }
-    ensureOtherReason(interval.exclusion);
+
     intervalMap.set(`${interval.parentId}:${interval.childId}`, interval);
   });
 
-  if (settings.freeEdit) {
-    Object.values(cloned.intervals).forEach((interval) => {
-      interval.delta = 0;
-    });
-    layoutGraphInPlace(cloned, settings.countFormat, { freeEdit: settings.freeEdit });
-    return cloned;
-  }
+  Object.values(cloned.nodes).forEach((node) => {
+    if (!Array.isArray(node.childIds)) {
+      return;
+    }
+    if (node.childIds.length > 1 && !settings.freeEdit) {
+      initializeBranchChildren(cloned, node);
+    }
+  });
 
-  if (settings.autoCalc) {
+  if (settings.autoCalc && !settings.freeEdit) {
     Object.values(cloned.nodes).forEach((node) => {
       if (!Array.isArray(node.childIds)) {
         node.childIds = [];
@@ -368,31 +447,45 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
       return;
     }
     if (childIds.length > 1) {
+      if (!settings.freeEdit) {
+        initializeBranchChildren(cloned, parentNode);
+      }
+
       const parentValue = parentNode.n ?? 0;
-      const totalChildren = childIds.reduce((acc, childId) => {
-        const interval = intervalMap.get(`${parentNode.id}:${childId}`);
-        const childNode = cloned.nodes[childId];
-        const exclusionValue = interval?.exclusion?.total ?? 0;
-        ensureOtherReason(interval!.exclusion!);
-        return acc + (childNode?.n ?? 0) + exclusionValue;
-      }, 0);
+      const branchEntries = childIds
+        .map((childId) => {
+          const interval = intervalMap.get(`${parentNode.id}:${childId}`);
+          if (!interval) {
+            return undefined;
+          }
+          return {
+            interval,
+            childNode: cloned.nodes[childId],
+          };
+        })
+        .filter((entry): entry is { interval: Interval; childNode?: BoxNode } => Boolean(entry));
+
+      const totalChildren = branchEntries.reduce((acc, { childNode }) => acc + (childNode?.n ?? 0), 0);
       const diff = parentValue - totalChildren;
-      childIds.forEach((childId) => {
-        const interval = intervalMap.get(`${parentNode.id}:${childId}`);
-        if (interval) {
-          interval.delta = diff;
-        }
+
+      branchEntries.forEach(({ interval }) => {
+        interval.delta = diff;
       });
-    } else {
+
+      return;
+    }
+
+    {
       const childId = childIds[0];
       const interval = intervalMap.get(`${parentNode.id}:${childId}`);
       const childNode = cloned.nodes[childId];
       if (!interval) {
         return;
       }
-      if (settings.autoCalc && parentNode.n != null) {
+      if (settings.autoCalc && !settings.freeEdit && parentNode.n != null) {
         if (interval.exclusion?.total == null && childNode?.n != null) {
-          interval.exclusion.total = parentNode.n - childNode.n;
+          const diff = parentNode.n - childNode.n;
+          interval.exclusion.total = diff > 0 ? diff : null;
         } else if (interval.exclusion?.total != null && childNode?.n == null) {
           childNode.n = parentNode.n - interval.exclusion.total;
         }
