@@ -6,7 +6,7 @@ import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constan
 import {
   computeExclusionHeight,
   computeNodeHeight,
-  getExclusionDisplayLines,
+  getExclusionDisplayContent,
   getNodeDisplayLines,
   LINE_HEIGHT,
 } from '../model/layout';
@@ -371,7 +371,8 @@ function renderExclusion({
     total: null,
     reasons: [],
   };
-  const lines = getExclusionDisplayLines(exclusion, countFormat, { freeEdit });
+  const display = getExclusionDisplayContent(exclusion, countFormat, { freeEdit });
+  const lines = display.lines;
   if (!lines.length) {
     return null;
   }
@@ -388,6 +389,11 @@ function renderExclusion({
   const exclusionHeight = computeExclusionHeight(exclusion, countFormat, { freeEdit });
   const boxY = lineStartY - exclusionHeight / 2;
   const lineTargetX = isLeft ? lineEndX : boxX;
+
+  const textOptions: { textClass: string; countClass?: string; countLineIndex?: number } =
+    display.totalLineIndex != null
+      ? { textClass: 'exclusion-text', countClass: 'node-count', countLineIndex: display.totalLineIndex }
+      : { textClass: 'exclusion-text' };
 
   return (
     <g
@@ -417,10 +423,7 @@ function renderExclusion({
         stroke={highlightStroke}
         strokeWidth={isSelected ? 3 : 2}
       />
-      {renderCenteredLines(lines, boxX + EXCLUSION_WIDTH / 2, boxY, exclusionHeight, {
-        textClass: 'exclusion-text',
-        countClass: 'node-count',
-      })}
+      {renderCenteredLines(lines, boxX + EXCLUSION_WIDTH / 2, boxY, exclusionHeight, textOptions)}
     </g>
   );
 }
@@ -430,7 +433,7 @@ function renderCenteredLines(
   centerX: number,
   topY: number,
   containerHeight: number,
-  classes: { textClass: string; countClass?: string }
+  classes: { textClass: string; countClass?: string; countLineIndex?: number }
 ) {
   const sanitized = lines.length ? lines : [''];
   const totalHeight = LINE_HEIGHT * sanitized.length;
@@ -439,7 +442,11 @@ function renderCenteredLines(
   return (
     <text x={centerX} y={startY} className={classes.textClass} textAnchor="middle">
       {sanitized.map((line, index) => {
-        const isCountLine = index === sanitized.length - 1 && Boolean(classes.countClass);
+        const countIndex =
+          classes.countClass !== undefined
+            ? classes.countLineIndex ?? sanitized.length - 1
+            : undefined;
+        const isCountLine = countIndex !== undefined && index === countIndex;
         return (
           <tspan
             key={index}

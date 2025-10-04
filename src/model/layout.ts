@@ -1,6 +1,6 @@
 import { BoxNode, ExclusionBox, ExclusionReason, NodeId, CountFormat } from './types';
 import { BOX_WIDTH } from './constants';
-import { formatCount, formatInteger } from './numbers';
+import { formatCount } from './numbers';
 
 export const LINE_HEIGHT = 20;
 export const NODE_MIN_HEIGHT = 120;
@@ -14,6 +14,11 @@ const EXCLUSION_MAX_CHARS = 22;
 
 interface DisplayOptions {
   freeEdit?: boolean;
+}
+
+export interface ExclusionDisplayContent {
+  lines: string[];
+  totalLineIndex: number | null;
 }
 
 function splitLongWord(word: string, maxChars: number): string[] {
@@ -88,13 +93,6 @@ export function computeNodeHeight(
   return Math.max(NODE_MIN_HEIGHT, totalLines * LINE_HEIGHT + NODE_VERTICAL_PADDING);
 }
 
-function formatReasonValue(value: number | null): string {
-  if (value == null) {
-    return '—';
-  }
-  return formatInteger(value);
-}
-
 function getVisibleReasons(exclusion: ExclusionBox | undefined, options: DisplayOptions): ExclusionReason[] {
   const reasons = exclusion?.reasons ?? [];
   return reasons.filter((reason) => {
@@ -108,46 +106,57 @@ function getVisibleReasons(exclusion: ExclusionBox | undefined, options: Display
   });
 }
 
-export function getExclusionDisplayLines(
+export function getExclusionDisplayContent(
   exclusion: ExclusionBox | undefined,
   countFormat: CountFormat = 'upper',
   options: DisplayOptions = {}
-): string[] {
+): ExclusionDisplayContent {
   const label = exclusion?.label ?? 'Excluded';
   const visibleReasons = getVisibleReasons(exclusion, options);
   const totalLine =
     options.freeEdit && exclusion?.totalOverride !== undefined && exclusion.totalOverride !== null
       ? exclusion.totalOverride
       : formatCount(exclusion?.total ?? null, countFormat);
+  const hasTotalOverride = exclusion?.totalOverride != null && exclusion.totalOverride.trim().length > 0;
+  const hasNumericTotal = exclusion?.total != null && exclusion.total !== 0;
+  const shouldShowTotal = !options.freeEdit || hasTotalOverride || hasNumericTotal;
+
   if (!visibleReasons.length) {
-    if (options.freeEdit) {
-      const hasOverride = exclusion?.totalOverride != null && exclusion.totalOverride.trim().length > 0;
-      const hasNumeric = exclusion?.total != null && exclusion.total !== 0;
-      if (!hasOverride && !hasNumeric) {
-        return [];
-      }
-      return [label, totalLine];
+    if (!shouldShowTotal) {
+      return { lines: [], totalLineIndex: null };
     }
-    if (exclusion?.total == null || exclusion.total === 0) {
-      return [];
-    }
-    return [label, totalLine];
+    return { lines: [label, totalLine], totalLineIndex: 1 };
   }
 
   const lines: string[] = [label];
+  let totalLineIndex: number | null = null;
+
+  if (shouldShowTotal) {
+    totalLineIndex = lines.length;
+    lines.push(totalLine);
+  }
+
   visibleReasons.forEach((reason) => {
-    const prefix = reason.label ? `${reason.label}:` : '—:';
-    const valueText =
-      options.freeEdit && reason.countOverride !== undefined && reason.countOverride !== null
-        ? reason.countOverride
-        : formatReasonValue(reason.n ?? null);
-    const wrapped = wrapTextLines([`${prefix} ${valueText}`], EXCLUSION_MAX_CHARS);
-    lines.push(...wrapped);
+    const baseLabel = reason.label?.trim().length ? reason.label.trim() : '—';
+    wrapTextLines([baseLabel], EXCLUSION_MAX_CHARS).forEach((segment) => {
+      lines.push(segment);
+    });
+
+    const hasReasonOverride =
+      options.freeEdit && reason.countOverride != null && reason.countOverride.trim().length > 0;
+    const countText = hasReasonOverride ? reason.countOverride! : formatCount(reason.n ?? null, countFormat);
+    lines.push(countText);
   });
 
-  lines.push(totalLine);
+  return { lines, totalLineIndex };
+}
 
-  return lines.length ? lines : [label];
+export function getExclusionDisplayLines(
+  exclusion: ExclusionBox | undefined,
+  countFormat: CountFormat = 'upper',
+  options: DisplayOptions = {}
+): string[] {
+  return getExclusionDisplayContent(exclusion, countFormat, options).lines;
 }
 
 export function computeExclusionHeight(
@@ -155,7 +164,8 @@ export function computeExclusionHeight(
   countFormat: CountFormat = 'upper',
   options: DisplayOptions = {}
 ): number {
-  const totalLines = getExclusionDisplayLines(exclusion, countFormat, options).length;
+  const { lines } = getExclusionDisplayContent(exclusion, countFormat, options);
+  const totalLines = lines.length;
   return Math.max(EXCLUSION_MIN_HEIGHT, totalLines * LINE_HEIGHT + EXCLUSION_VERTICAL_PADDING);
 }
 
