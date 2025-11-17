@@ -58,6 +58,7 @@ interface AppStore {
     toggleCountFormat: () => void;
     toggleFreeEdit: () => void;
     toggleArrow: (intervalId: IntervalId) => void;
+    setHelpEnabled: (value: boolean) => void;
     selectById: (id: string | undefined) => void;
     navigateSelection: (direction: 'up' | 'down' | 'left' | 'right') => void;
     undo: () => void;
@@ -73,6 +74,7 @@ const defaultSettings: AppSettings = {
   arrowsGlobal: true,
   countFormat: 'upper',
   freeEdit: false,
+  helpEnabled: true,
 };
 
 const defaultGraph = recomputeGraph(createInitialGraph(), defaultSettings);
@@ -295,6 +297,15 @@ export const useAppStore = create<AppStore>()(
               };
             });
           },
+          setHelpEnabled: (value) => {
+            set((state) => ({
+              ...state,
+              settings: {
+                ...state.settings,
+                helpEnabled: value,
+              },
+            }));
+          },
           selectById: (id) => {
             set((state) => ({
               ...state,
@@ -384,6 +395,9 @@ export const useAppStore = create<AppStore>()(
           }
           if (typeof mergedSettings.freeEdit !== 'boolean') {
             mergedSettings.freeEdit = false;
+          }
+          if (typeof mergedSettings.helpEnabled !== 'boolean') {
+            mergedSettings.helpEnabled = true;
           }
           return {
             ...currentState,

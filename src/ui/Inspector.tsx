@@ -3,6 +3,7 @@ import { useAppStore } from '../state/useStore';
 import { getSelectionKind } from '../model/graph';
 import { GraphState, AppSettings, ExclusionReasonKind } from '../model/types';
 import { formatCount, formatInteger, parseCount } from '../model/numbers';
+import { useHelp } from '../help/HelpContext';
 
 interface ReasonDraft {
   id: string;
@@ -45,6 +46,7 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
 
   const nodes = graph.nodes;
   const intervals = graph.intervals;
+  const { requestHelp, helpEnabled } = useHelp();
 
   useEffect(() => {
     if (selectionKind === 'node' && selectedId) {
@@ -120,6 +122,40 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
       setReasonDrafts([]);
     }
   }, [selectionKind, selectedId, nodes, intervals, isEditingReasons, settings]);
+
+  useEffect(() => {
+    if (!helpEnabled) {
+      return;
+    }
+    if (selectionKind === 'node' && selectedId) {
+      requestHelp('inspector-node', {
+        title: 'Editing a box',
+        body: (
+          <p>
+            Update the headline text and patient count here. Counts follow upstream totals automatically so everyone is
+            accounted for—unless you switch to free edit or change the numbers in earlier boxes.
+          </p>
+        ),
+      });
+    }
+    if (selectionKind === 'interval' && selectedId) {
+      const interval = intervals[selectedId];
+      const parent = interval ? graph.nodes[interval.parentId] : undefined;
+      const parentChildren = parent?.childIds ?? [];
+      const canEditExclusion = parentChildren.length <= 1;
+      if (interval && canEditExclusion) {
+        requestHelp('inspector-interval', {
+          title: 'Editing exclusions',
+          body: (
+            <p>
+              Connections can explain how many people leave the flow. Add a label and excluded total, then break the
+              total into reason rows if you need detail.
+            </p>
+          ),
+        });
+      }
+    }
+  }, [graph.nodes, helpEnabled, intervals, requestHelp, selectionKind, selectedId]);
 
   if (!selectedId || !selectionKind) {
     return (
@@ -212,6 +248,17 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
       settings.freeEdit ? exclusionCount : undefined
     );
 
+  const explainReasons = () =>
+    requestHelp('exclusion-reasons', {
+      title: 'Working with exclusion rows',
+      body: (
+        <p>
+          Each row should explain a reason for leaving the study. The total should equal the excluded count unless you
+          intentionally diverge in free edit mode.
+        </p>
+      ),
+    });
+
   return (
     <aside className="inspector">
       <h3>Exclusion Details</h3>
@@ -268,7 +315,10 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
                 type="text"
                 value={reason.label}
                 onChange={(event) => updateReasonDraftLabel(reason.id, event.target.value)}
-                onFocus={() => setIsEditingReasons(true)}
+                onFocus={() => {
+                  setIsEditingReasons(true);
+                  explainReasons();
+                }}
                 onBlur={() => {
                   setIsEditingReasons(false);
                   updateExclusionReasonLabel(selectedId, reason.id, getReasonDraftLabel(reason.id));
@@ -289,7 +339,10 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
                     commitReasonCount();
                   }
                 }}
-                onFocus={() => setIsEditingReasons(true)}
+                onFocus={() => {
+                  setIsEditingReasons(true);
+                  explainReasons();
+                }}
                 readOnly={reason.kind === 'auto' && !settings.freeEdit}
               />
               </div>
@@ -306,6 +359,7 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
           className="add-reason"
           onClick={() => {
             addExclusionReason(selectedId);
+            explainReasons();
           }}
         >
           + Add row

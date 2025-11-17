@@ -52,6 +52,7 @@ export interface AppSettings {
   arrowsGlobal: boolean;
   countFormat: CountFormat;
   freeEdit: boolean;
+  helpEnabled: boolean;
 }
 
 export interface PersistedProject {

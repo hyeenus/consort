@@ -2,14 +2,13 @@
 
 Browser-based tool for constructing publication-ready CONSORT-style patient flow diagrams. This repository implements the Version 1 feature set defined in `SPEC.md` and `ROADMAP.md`.
 
-## Quick Start
+## Using the App
 
-```bash
-npm install
-npm run dev
-```
-
-Open the printed URL (default `http://localhost:5173`) in Chrome, Firefox, Safari, or Edge. The app stores your latest project in local storage so you can pick up where you left off.
+- Open the published build at `https://hyeenus.github.io/consort/consort_builder/` (or the project page linked from the repository description).
+- Select boxes on the canvas to edit their text and patient counts in the inspector on the right; the app keeps totals balanced automatically unless you enable Free Edit.
+- Use the toolbar to add steps, switch between arrows/lines, format counts, or export SVG/PNG/JSON snapshots.
+- Contextual help pop-ups appear the first time you use each feature and can be toggled via the Help button in the toolbar.
+- Projects save in your browser automatically; export JSON if you need to move to another device.
 
 ### Scripts
 
@@ -49,3 +48,12 @@ Refer to `SPEC.md` and `ROADMAP.md` for the complete target scope and upcoming m
 ## Deployment (GitHub Pages)
 
 Pushing to the `main` branch triggers `.github/workflows/deploy.yml`, which runs tests, builds the Vite bundle, and deploys the contents of `dist/` to GitHub Pages. The site will be served from `https://hyeenus.github.io/consort/`, and `vite.config.ts` already sets `base: '/consort/'` so asset URLs resolve correctly.
+
+## Contextual Help (V1.1)
+
+The app now includes contextual pop-up guidance that appears the first time each feature is used. Highlights:
+
+- A welcome screen explains how to build CONSORT diagrams before any other tips appear.
+- Each toolbar toggle and export button shows a one-time description after its first use.
+- Inspector tips explain node editing, exclusions, and the auto-balancing logic.
+- Users can disable help permanently via each popup or the Help toggle in the toolbar, and re-enable it later if needed.
