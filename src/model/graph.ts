@@ -9,6 +9,7 @@ import {
   Interval,
   IntervalId,
   NodeId,
+  PhaseBox,
 } from './types';
 import { layoutTree } from './layout';
 
@@ -29,6 +30,7 @@ export function createInitialGraph(): GraphState {
   return {
     nodes: { [startId]: startNode },
     intervals: {},
+    phases: [],
     startNodeId: startId,
     selectedId: startId,
   };
@@ -62,6 +64,7 @@ function cloneGraph(graph: GraphState): GraphState {
       ])
     ),
     intervals: structuredClone(graph.intervals),
+    phases: graph.phases?.map((phase) => ({ ...phase })) ?? [],
     startNodeId: graph.startNodeId,
     selectedId: graph.selectedId,
   };
@@ -99,6 +102,20 @@ function ensureOtherReason(exclusion: ExclusionBox): void {
     autoReason.label = 'Other';
   }
   exclusion.reasons.push(autoReason);
+}
+
+function getMainFlowNodes(graph: GraphState): BoxNode[] {
+  return Object.values(graph.nodes)
+    .filter((node) => node.column === 0)
+    .sort((a, b) => a.position.y - b.position.y);
+}
+
+function getPhase(graph: GraphState, phaseId: string): PhaseBox {
+  const phase = graph.phases.find((item) => item.id === phaseId);
+  if (!phase) {
+    throw new Error('Phase not found');
+  }
+  return phase;
 }
 
 function initializeBranchChildren(graph: GraphState, parent: BoxNode): void {
@@ -276,6 +293,71 @@ export function updateExclusionCount(
   return cloned;
 }
 
+export function addPhase(graph: GraphState): GraphState {
+  const cloned = cloneGraph(graph);
+  const mainNodes = getMainFlowNodes(cloned);
+  if (!mainNodes.length) {
+    return cloned;
+  }
+  const lastIndex = mainNodes.length - 1;
+  const existingPhases = cloned.phases ?? [];
+  reflowPhaseRanges(cloned, mainNodes);
+  const nodeIndex = new Map(mainNodes.map((node, index) => [node.id, index] as const));
+  const lastExisting = existingPhases.at(-1);
+  const lastExistingEnd = lastExisting ? nodeIndex.get(lastExisting.endNodeId) ?? lastIndex : -1;
+  const newStartIndex = Math.min(lastIndex, Math.max(0, lastExistingEnd + 1));
+
+  const nextIndex = existingPhases.length + 1;
+  const newPhase: PhaseBox = {
+    id: nanoid(),
+    label: `Phase ${nextIndex}`,
+    startNodeId: mainNodes[newStartIndex].id,
+    endNodeId: mainNodes[lastIndex].id,
+  };
+  cloned.phases = [...existingPhases, newPhase];
+  reflowPhaseRanges(cloned, mainNodes);
+  cloned.selectedId = newPhase.id;
+  return cloned;
+}
+
+export function updatePhaseLabel(graph: GraphState, phaseId: string, label: string): GraphState {
+  const cloned = cloneGraph(graph);
+  const phase = getPhase(cloned, phaseId);
+  phase.label = label;
+  return cloned;
+}
+
+export function updatePhaseBounds(
+  graph: GraphState,
+  phaseId: string,
+  startNodeId: NodeId,
+  endNodeId: NodeId
+): GraphState {
+  const cloned = cloneGraph(graph);
+  const phase = getPhase(cloned, phaseId);
+  const mainNodes = getMainFlowNodes(cloned);
+  if (!mainNodes.length) {
+    return cloned;
+  }
+  const orderMap = new Map(mainNodes.map((node, index) => [node.id, index] as const));
+  const startIndex = orderMap.get(startNodeId) ?? 0;
+  const endIndex = orderMap.get(endNodeId) ?? startIndex;
+  const normalizedStartIndex = Math.min(startIndex, endIndex);
+  const normalizedEndIndex = Math.max(startIndex, endIndex);
+  phase.startNodeId = mainNodes[normalizedStartIndex]?.id ?? mainNodes[0].id;
+  phase.endNodeId = mainNodes[normalizedEndIndex]?.id ?? mainNodes[mainNodes.length - 1].id;
+  return cloned;
+}
+
+export function removePhase(graph: GraphState, phaseId: string): GraphState {
+  const cloned = cloneGraph(graph);
+  cloned.phases = (cloned.phases ?? []).filter((phase) => phase.id !== phaseId);
+  if (cloned.selectedId === phaseId) {
+    cloned.selectedId = cloned.startNodeId ?? cloned.selectedId;
+  }
+  return cloned;
+}
+
 export function addExclusionReason(graph: GraphState, intervalId: IntervalId): GraphState {
   const cloned = cloneGraph(graph);
   const interval = cloned.intervals[intervalId];
@@ -377,6 +459,54 @@ function layoutGraphInPlace(
   });
   const { order } = layoutTree(graph.nodes, graph.startNodeId, countFormat, { freeEdit: options.freeEdit });
   (graph as Record<string, unknown>).__order = order;
+}
+
+function normalizePhases(graph: GraphState): void {
+  if (!Array.isArray(graph.phases)) {
+    graph.phases = [];
+    return;
+  }
+  const mainNodes = getMainFlowNodes(graph);
+  if (!mainNodes.length) {
+    graph.phases = [];
+    return;
+  }
+  reflowPhaseRanges(graph, mainNodes);
+}
+
+function reflowPhaseRanges(graph: GraphState, mainNodes: BoxNode[]): void {
+  if (!graph.phases?.length) {
+    return;
+  }
+  const lastIndex = mainNodes.length - 1;
+  const map = new Map(mainNodes.map((node, index) => [node.id, index] as const));
+  let previousEnd = -1;
+  const total = graph.phases.length;
+  graph.phases.forEach((phase, index) => {
+    let startIndex = map.get(phase.startNodeId) ?? 0;
+    let endIndex = map.get(phase.endNodeId) ?? lastIndex;
+    startIndex = Math.max(0, Math.min(startIndex, lastIndex));
+    endIndex = Math.max(startIndex, Math.min(endIndex, lastIndex));
+
+    const minStart = previousEnd + 1;
+    if (startIndex < minStart) {
+      startIndex = minStart;
+    }
+    const maxEndAllowed = lastIndex - (total - index - 1);
+    if (endIndex > maxEndAllowed) {
+      endIndex = maxEndAllowed;
+    }
+    if (startIndex > maxEndAllowed) {
+      startIndex = maxEndAllowed;
+    }
+    if (startIndex > endIndex) {
+      startIndex = endIndex;
+    }
+
+    phase.startNodeId = mainNodes[startIndex].id;
+    phase.endNodeId = mainNodes[endIndex].id;
+    previousEnd = endIndex;
+  });
 }
 
 export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphState {
@@ -498,6 +628,7 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
   });
 
   layoutGraphInPlace(cloned, settings.countFormat, { freeEdit: settings.freeEdit });
+  normalizePhases(cloned);
   return cloned;
 }
 
@@ -572,7 +703,7 @@ export function isIntervalSelected(graph: GraphState, id: string): boolean {
   return graph.selectedId === id;
 }
 
-export function getSelectionKind(graph: GraphState): 'node' | 'interval' | undefined {
+export function getSelectionKind(graph: GraphState): 'node' | 'interval' | 'phase' | undefined {
   if (!graph.selectedId) {
     return undefined;
   }
@@ -581,6 +712,9 @@ export function getSelectionKind(graph: GraphState): 'node' | 'interval' | undef
   }
   if (graph.intervals[graph.selectedId]) {
     return 'interval';
+  }
+  if ((graph.phases ?? []).some((phase) => phase.id === graph.selectedId)) {
+    return 'phase';
   }
   return undefined;
 }
@@ -592,6 +726,9 @@ export function navigateSelection(graph: GraphState, direction: 'up' | 'down' | 
   }
   if (kind === 'interval') {
     return navigateFromInterval(graph, graph.selectedId as IntervalId, direction);
+  }
+  if (kind === 'phase') {
+    return graph.selectedId;
   }
   return undefined;
 }

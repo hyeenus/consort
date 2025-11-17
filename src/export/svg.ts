@@ -1,6 +1,6 @@
 import { AppSettings, GraphState } from '../model/types';
 import { orderNodes } from '../model/graph';
-import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
+import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH, PHASE_GAP, PHASE_WIDTH } from '../model/constants';
 import {
   computeExclusionHeight,
   computeNodeHeight,
@@ -11,11 +11,94 @@ import {
 
 const CANVAS_MARGIN = 120;
 
+function hasVisibleExclusion(interval: GraphState['intervals'][string]): boolean {
+  const exclusion = interval.exclusion;
+  if (!exclusion) {
+    return false;
+  }
+  if (exclusion.label && exclusion.label.trim() && exclusion.label.trim() !== 'Excluded') {
+    return true;
+  }
+  if (exclusion.totalOverride && exclusion.totalOverride.trim().length > 0) {
+    return true;
+  }
+  if (exclusion.total != null && exclusion.total !== 0) {
+    return true;
+  }
+  return exclusion.reasons.some((reason) => {
+    if (reason.kind === 'user') {
+      return true;
+    }
+    if (reason.countOverride && reason.countOverride.trim().length > 0) {
+      return true;
+    }
+    return reason.n != null && reason.n !== 0;
+  });
+}
+
+function resolveExclusionSide(
+  parentCenter: number,
+  childCenter: number,
+  totalChildren: number,
+  childIndex: number,
+  inheritedSide?: 'left' | 'right'
+): 'left' | 'right' {
+  if (inheritedSide) {
+    return inheritedSide;
+  }
+  if (totalChildren > 1) {
+    const threshold = totalChildren / 2;
+    return childIndex < threshold ? 'left' : 'right';
+  }
+  if (childCenter < parentCenter - 0.1) {
+    return 'left';
+  }
+  if (childCenter > parentCenter + 0.1) {
+    return 'right';
+  }
+  return 'right';
+}
+
+function computeLeftExclusionBound(graph: GraphState, settings: AppSettings): number | undefined {
+  let minLeft: number | undefined;
+  Object.values(graph.intervals).forEach((interval) => {
+    const parent = graph.nodes[interval.parentId];
+    const child = graph.nodes[interval.childId];
+    if (!parent || !child) {
+      return;
+    }
+    const parentChildren = parent.childIds ?? [];
+    const totalChildren = parentChildren.length;
+    const childIndex = parentChildren.indexOf(child.id);
+    const isBranchChild = totalChildren > 1;
+    const allowExclusion = totalChildren <= 1 || hasVisibleExclusion(interval);
+    if (!allowExclusion) {
+      return;
+    }
+    const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
+    const display = getExclusionDisplayContent(exclusion, settings.countFormat, { freeEdit: settings.freeEdit });
+    if (!display.lines.length) {
+      return;
+    }
+    const inheritedSide = (child as unknown as { __branchSide?: 'left' | 'right' }).__branchSide;
+    const side = resolveExclusionSide(parent.position.x, child.position.x, totalChildren, childIndex, inheritedSide);
+    if (side !== 'left') {
+      return;
+    }
+    const isStraight = !isBranchChild || Math.abs(parent.position.x - child.position.x) < 0.1;
+    const anchorX = isStraight ? parent.position.x : child.position.x;
+    const boxLeft = anchorX - EXCLUSION_OFFSET_X - EXCLUSION_WIDTH;
+    minLeft = minLeft === undefined ? boxLeft : Math.min(minLeft, boxLeft);
+  });
+  return minLeft;
+}
+
 export function generateSvg(graph: GraphState, settings: AppSettings): string {
   const nodesOrdered = orderNodes(graph);
   let minX = Infinity;
   let maxX = -Infinity;
   let maxBottom = 0;
+  let minNodeLeft = Infinity;
   const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
   nodesOrdered.forEach((node) => {
     const center = node.position.x;
@@ -25,16 +108,26 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
     minX = Math.min(minX, center - halfWidth - exclusionReach);
     maxX = Math.max(maxX, center + halfWidth + exclusionReach);
     maxBottom = Math.max(maxBottom, bottom);
+    minNodeLeft = Math.min(minNodeLeft, center - halfWidth);
   });
   if (!Number.isFinite(minX)) {
     const fallbackHalf = BOX_WIDTH / 2 + exclusionReach;
     minX = -fallbackHalf;
     maxX = fallbackHalf;
   }
+  if (!Number.isFinite(minNodeLeft)) {
+    minNodeLeft = -BOX_WIDTH / 2;
+  }
+  if (Number.isFinite(minNodeLeft)) {
+    minX = Math.min(minX, minNodeLeft - (PHASE_WIDTH + PHASE_GAP));
+  }
   const width = Math.max(960, maxX - minX + CANVAS_MARGIN);
   const centerX = -minX + CANVAS_MARGIN / 2;
   const verticalOffset = CANVAS_MARGIN / 2;
   const height = maxBottom + CANVAS_MARGIN;
+  const leftExclusionBound = computeLeftExclusionBound(graph, settings);
+  const diagramLeft = leftExclusionBound !== undefined ? Math.min(minNodeLeft, leftExclusionBound) : minNodeLeft;
+  const phaseRailX = centerX + diagramLeft - PHASE_GAP - PHASE_WIDTH;
 
   const svgParts: string[] = [];
 
@@ -203,6 +296,41 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
           line
         )}</tspan>`
       );
+    });
+    svgParts.push('</text>');
+  });
+
+  const anchorMap = new Map(
+    nodesOrdered
+      .filter((node) => node.column === 0)
+      .map((node) => {
+        const top = verticalOffset + node.position.y;
+        const bottom = top + computeNodeHeight(node, settings.countFormat, { freeEdit: settings.freeEdit });
+        return [node.id, { top, bottom }] as const;
+      })
+  );
+
+  (graph.phases ?? []).forEach((phase) => {
+    const start = anchorMap.get(phase.startNodeId);
+    const end = anchorMap.get(phase.endNodeId);
+    if (!start || !end) {
+      return;
+    }
+    const topY = start.top;
+    const bottomY = Math.max(end.bottom, topY + 1);
+    const phaseHeight = bottomY - topY;
+    const textX = phaseRailX + PHASE_WIDTH / 2;
+    const textY = topY + phaseHeight / 2;
+    const label = phase.label?.trim().length ? phase.label : 'Phase';
+    const lines = label.split(/\n+/);
+
+    svgParts.push(
+      `<rect x="${phaseRailX}" y="${topY}" width="${PHASE_WIDTH}" height="${phaseHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
+      `<text x="${textX}" y="${textY}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" transform="rotate(-90 ${textX} ${textY})">`
+    );
+    lines.forEach((line, index) => {
+      const dy = index === 0 ? 0 : LINE_HEIGHT;
+      svgParts.push(`<tspan x="${textX}" dy="${dy}">${escapeText(line)}</tspan>`);
     });
     svgParts.push('</text>');
   });

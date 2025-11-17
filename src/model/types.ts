@@ -38,9 +38,19 @@ export interface Interval {
   arrow: boolean;
 }
 
+export type PhaseId = string;
+
+export interface PhaseBox {
+  id: PhaseId;
+  label: string;
+  startNodeId: NodeId;
+  endNodeId: NodeId;
+}
+
 export interface GraphState {
   nodes: Record<NodeId, BoxNode>;
   intervals: Record<IntervalId, Interval>;
+  phases: PhaseBox[];
   startNodeId: NodeId | null;
   selectedId?: string;
 }
@@ -61,4 +71,4 @@ export interface PersistedProject {
   version: 1;
 }
 
-export type SelectionKind = 'node' | 'interval' | undefined;
+export type SelectionKind = 'node' | 'interval' | 'phase' | undefined;

@@ -29,6 +29,7 @@ export const App: React.FC = () => {
   const {
     addNodeBelow,
     addBranchChild,
+    addPhase,
     selectById,
     toggleAutoCalc,
     toggleArrowsGlobal,
@@ -37,6 +38,9 @@ export const App: React.FC = () => {
     undo,
     redo,
     removeNode,
+    updatePhaseBounds,
+    updatePhaseLabel,
+    removePhase,
     createExportSnapshot,
     importSnapshot,
     reset,
@@ -55,6 +59,7 @@ export const App: React.FC = () => {
         actions={{
           addNodeBelow,
           addBranchChild,
+          addPhase,
           selectById,
           toggleAutoCalc,
           toggleArrowsGlobal,
@@ -63,6 +68,9 @@ export const App: React.FC = () => {
           undo,
           redo,
           removeNode,
+          updatePhaseBounds,
+          updatePhaseLabel,
+          removePhase,
           createExportSnapshot,
           importSnapshot,
           reset,
@@ -79,6 +87,7 @@ interface AppContentProps {
   actions: {
     addNodeBelow: (parentId: string) => void;
     addBranchChild: (parentId: string) => void;
+    addPhase: () => void;
     selectById: (id: string | undefined) => void;
     toggleAutoCalc: () => void;
     toggleArrowsGlobal: () => void;
@@ -87,6 +96,9 @@ interface AppContentProps {
     undo: () => void;
     redo: () => void;
     removeNode: (nodeId: string) => void;
+    updatePhaseBounds: (phaseId: string, startNodeId: string, endNodeId: string) => void;
+    updatePhaseLabel: (phaseId: string, label: string) => void;
+    removePhase: (phaseId: string) => void;
     createExportSnapshot: () => PersistedProject;
     importSnapshot: (snapshot: PersistedProject) => void;
     reset: () => void;
@@ -98,6 +110,7 @@ const AppContent: React.FC<AppContentProps> = ({ graph, settings, actions }) => 
   const {
     addNodeBelow,
     addBranchChild,
+    addPhase,
     selectById,
     toggleAutoCalc,
     toggleArrowsGlobal,
@@ -106,6 +119,9 @@ const AppContent: React.FC<AppContentProps> = ({ graph, settings, actions }) => 
     undo,
     redo,
     removeNode,
+    updatePhaseBounds,
+    updatePhaseLabel,
+    removePhase,
     createExportSnapshot,
     importSnapshot,
     reset,
@@ -184,6 +200,18 @@ const AppContent: React.FC<AppContentProps> = ({ graph, settings, actions }) => 
         }}
         onUndo={undo}
         onRedo={redo}
+        onAddPhase={() => {
+          addPhase();
+          requestHelp('phase-boxes', {
+            title: 'Phase labels',
+            body: (
+              <p>
+                Phase markers run down the left side of the diagram. Drag their handles to snap the top and bottom to
+                any main-flow box, or rename them in the inspector.
+              </p>
+            ),
+          });
+        }}
         onExportSvg={() => {
           const snapshotSvg = generateSvg(graph, settings);
           downloadString(snapshotSvg, 'consort-flow.svg', 'image/svg+xml;charset=utf-8');
@@ -291,8 +319,17 @@ const AppContent: React.FC<AppContentProps> = ({ graph, settings, actions }) => 
           onRemove={(nodeId) => {
             removeNode(nodeId);
           }}
+          onAdjustPhase={(phaseId, startNodeId, endNodeId) => {
+            updatePhaseBounds(phaseId, startNodeId, endNodeId);
+          }}
         />
-        <Inspector graph={graph} settings={settings} />
+        <Inspector
+          graph={graph}
+          settings={settings}
+          onUpdatePhaseLabel={updatePhaseLabel}
+          onRemovePhase={removePhase}
+          onAdjustPhase={updatePhaseBounds}
+        />
       </div>
     </div>
   );

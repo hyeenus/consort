@@ -1,10 +1,11 @@
 import React, { useRef } from 'react';
-import { AppSettings } from '../model/types';
+import { AppSettings, SelectionKind } from '../model/types';
 
 interface ToolbarProps {
-  selectionKind: 'node' | 'interval' | undefined;
+  selectionKind: SelectionKind;
   settings: AppSettings;
   onAddStep: () => void;
+  onAddPhase: () => void;
   onToggleAutoCalc: () => void;
   onToggleArrows: () => void;
   onToggleCountFormat: () => void;
@@ -22,6 +23,7 @@ interface ToolbarProps {
 export const Toolbar: React.FC<ToolbarProps> = ({
   settings,
   onAddStep,
+  onAddPhase,
   onToggleAutoCalc,
   onToggleArrows,
   onToggleCountFormat,
@@ -46,6 +48,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <div className="toolbar-group">
         <button type="button" onClick={onAddStep}>
           + Add Step
+        </button>
+        <button type="button" onClick={onAddPhase}>
+          + Add Phase
         </button>
         <button type="button" onClick={onToggleAutoCalc}>
           {settings.autoCalc ? 'Unlock Numbers' : 'Lock Numbers'}
