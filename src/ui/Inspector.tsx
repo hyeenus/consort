@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../state/useStore';
-import { getSelectionKind } from '../model/graph';
-import { GraphState, AppSettings, ExclusionReasonKind } from '../model/types';
+import { getSelectionKind, orderNodes } from '../model/graph';
+import { GraphState, AppSettings, ExclusionReasonKind, NodeId } from '../model/types';
 import { formatCount, formatInteger, parseCount } from '../model/numbers';
 import { useHelp } from '../help/HelpContext';
 
@@ -15,9 +15,12 @@ interface ReasonDraft {
 interface InspectorProps {
   graph: GraphState;
   settings: AppSettings;
+  onUpdatePhaseLabel: (phaseId: string, label: string) => void;
+  onRemovePhase: (phaseId: string) => void;
+  onAdjustPhase: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
+export const Inspector: React.FC<InspectorProps> = ({ graph, settings, onUpdatePhaseLabel, onRemovePhase, onAdjustPhase }) => {
   const {
     updateNodeText,
     updateNodeCount,
@@ -36,6 +39,9 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
   const [exclusionCount, setExclusionCount] = useState('');
   const [reasonDrafts, setReasonDrafts] = useState<ReasonDraft[]>([]);
   const [isEditingReasons, setIsEditingReasons] = useState(false);
+  const [phaseLabel, setPhaseLabel] = useState('');
+  const [phaseStartId, setPhaseStartId] = useState<NodeId | ''>('');
+  const [phaseEndId, setPhaseEndId] = useState<NodeId | ''>('');
 
   const {
     updateLabel: updateReasonDraftLabel,
@@ -47,6 +53,7 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
   const nodes = graph.nodes;
   const intervals = graph.intervals;
   const { requestHelp, helpEnabled } = useHelp();
+  const mainFlowNodes = useMemo(() => orderNodes(graph).filter((node) => node.column === 0), [graph]);
 
   useEffect(() => {
     if (selectionKind === 'node' && selectedId) {
@@ -120,6 +127,18 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
       setExclusionLabel('');
       setExclusionCount('');
       setReasonDrafts([]);
+      setPhaseLabel('');
+      setPhaseStartId('');
+      setPhaseEndId('');
+    }
+
+    if (selectionKind === 'phase' && selectedId) {
+      const phase = (graph.phases ?? []).find((item) => item.id === selectedId);
+      if (phase) {
+        setPhaseLabel((current) => (current === phase.label ? current : phase.label));
+        setPhaseStartId(phase.startNodeId);
+        setPhaseEndId(phase.endNodeId);
+      }
     }
   }, [selectionKind, selectedId, nodes, intervals, isEditingReasons, settings]);
 
@@ -162,6 +181,78 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
       <aside className="inspector empty">
         <h3>Inspector</h3>
         <p>Select a box or connection to edit its details.</p>
+      </aside>
+    );
+  }
+
+  if (selectionKind === 'phase') {
+    const phase = (graph.phases ?? []).find((item) => item.id === selectedId);
+    if (!phase) {
+      return null;
+    }
+    const handlePhaseLabelBlur = () => {
+      const trimmed = phaseLabel.trim().length ? phaseLabel : 'Phase';
+      onUpdatePhaseLabel(phase.id, trimmed);
+      setPhaseLabel(trimmed);
+    };
+    const currentStart = phaseStartId || phase.startNodeId;
+    const currentEnd = phaseEndId || phase.endNodeId;
+
+    return (
+      <aside className="inspector">
+        <h3>Phase Label</h3>
+        <label className="field">
+          <span>Text</span>
+          <input
+            type="text"
+            value={phaseLabel}
+            onChange={(event) => setPhaseLabel(event.target.value)}
+            onBlur={handlePhaseLabelBlur}
+          />
+        </label>
+        <label className="field">
+          <span>Top aligns with</span>
+          <select
+            value={currentStart}
+            disabled={!mainFlowNodes.length}
+            onChange={(event) => {
+              const next = event.target.value as NodeId;
+              setPhaseStartId(next);
+              onAdjustPhase(phase.id, next, currentEnd);
+            }}
+          >
+            {mainFlowNodes.map((node) => (
+              <option key={node.id} value={node.id}>
+                {node.textLines[0] || 'Step'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Bottom aligns with</span>
+          <select
+            value={currentEnd}
+            disabled={!mainFlowNodes.length}
+            onChange={(event) => {
+              const next = event.target.value as NodeId;
+              setPhaseEndId(next);
+              onAdjustPhase(phase.id, currentStart, next);
+            }}
+          >
+            {mainFlowNodes.map((node) => (
+              <option key={node.id} value={node.id}>
+                {node.textLines[0] || 'Step'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => onRemovePhase(phase.id)}
+          style={{ marginTop: 12 }}
+        >
+          Remove Phase
+        </button>
       </aside>
     );
   }
@@ -252,10 +343,16 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings }) => {
     requestHelp('exclusion-reasons', {
       title: 'Working with exclusion rows',
       body: (
-        <p>
-          Each row should explain a reason for leaving the study. The total should equal the excluded count unless you
-          intentionally diverge in free edit mode.
-        </p>
+        <>
+          <p>
+            Each row should explain a reason for leaving the study. The total should equal the excluded count unless you
+            intentionally diverge in free edit mode.
+          </p>
+          <p>
+            The automatic Other row remains visible until every participant is accounted for or you rename it to a
+            specific reason.
+          </p>
+        </>
       ),
     });
 

@@ -172,6 +172,25 @@ body {
   font-family: 'Inter', system-ui, sans-serif;
 }
 
+.phase-box text,
+.phase-text {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  fill: #111;
+  font-weight: 600;
+}
+
+.phase-handle {
+  fill: #0057ff;
+  stroke: #0057ff;
+  cursor: ns-resize;
+}
+
+.phase-handle:hover {
+  fill: #003fba;
+  stroke: #003fba;
+}
+
 .reasons {
   display: flex;
   flex-direction: column;

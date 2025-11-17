@@ -1,8 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import classNames from 'classnames';
-import { GraphState, AppSettings, Interval, CountFormat } from '../model/types';
+import { GraphState, AppSettings, Interval, CountFormat, PhaseBox, NodeId } from '../model/types';
 import { orderNodes } from '../model/graph';
-import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH } from '../model/constants';
+import { BOX_WIDTH, EXCLUSION_OFFSET_X, EXCLUSION_WIDTH, PHASE_GAP, PHASE_WIDTH } from '../model/constants';
 import {
   computeExclusionHeight,
   computeNodeHeight,
@@ -18,9 +18,92 @@ interface CanvasProps {
   onCreateBelow: (nodeId: string) => void;
   onBranch: (nodeId: string) => void;
   onRemove: (nodeId: string) => void;
+  onAdjustPhase: (phaseId: string, startNodeId: string, endNodeId: string) => void;
 }
 
 const CANVAS_MARGIN = 120;
+
+function hasVisibleExclusion(interval: Interval): boolean {
+  const exclusion = interval.exclusion;
+  if (!exclusion) {
+    return false;
+  }
+  if (exclusion.label && exclusion.label.trim() && exclusion.label.trim() !== 'Excluded') {
+    return true;
+  }
+  if (exclusion.totalOverride && exclusion.totalOverride.trim().length > 0) {
+    return true;
+  }
+  if (exclusion.total != null && exclusion.total !== 0) {
+    return true;
+  }
+  return exclusion.reasons.some((reason) => {
+    if (reason.kind === 'user') {
+      return true;
+    }
+    if (reason.countOverride && reason.countOverride.trim().length > 0) {
+      return true;
+    }
+    return reason.n != null && reason.n !== 0;
+  });
+}
+
+function resolveExclusionSide(
+  parentCenter: number,
+  childCenter: number,
+  totalChildren: number,
+  childIndex: number,
+  inheritedSide?: 'left' | 'right'
+): 'left' | 'right' {
+  if (inheritedSide) {
+    return inheritedSide;
+  }
+  if (totalChildren > 1) {
+    const threshold = totalChildren / 2;
+    return childIndex < threshold ? 'left' : 'right';
+  }
+  if (childCenter < parentCenter - 0.1) {
+    return 'left';
+  }
+  if (childCenter > parentCenter + 0.1) {
+    return 'right';
+  }
+  return 'right';
+}
+
+function computeLeftExclusionBound(graph: GraphState, settings: AppSettings): number | undefined {
+  let minLeft: number | undefined;
+  Object.values(graph.intervals).forEach((interval) => {
+    const parent = graph.nodes[interval.parentId];
+    const child = graph.nodes[interval.childId];
+    if (!parent || !child) {
+      return;
+    }
+    const parentChildren = parent.childIds ?? [];
+    const totalChildren = parentChildren.length;
+    const childIndex = parentChildren.indexOf(child.id);
+    const isBranchChild = totalChildren > 1;
+    const allowExclusion = totalChildren <= 1 || hasVisibleExclusion(interval);
+    if (!allowExclusion) {
+      return;
+    }
+    const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
+    const display = getExclusionDisplayContent(exclusion, settings.countFormat, { freeEdit: settings.freeEdit });
+    if (!display.lines.length) {
+      return;
+    }
+    const inheritedSide = (child as unknown as { __branchSide?: 'left' | 'right' }).__branchSide;
+    const side = resolveExclusionSide(parent.position.x, child.position.x, totalChildren, childIndex, inheritedSide);
+    if (side !== 'left') {
+      return;
+    }
+    const isStraight = !isBranchChild || Math.abs(parent.position.x - child.position.x) < 0.1;
+    const anchorX = isStraight ? parent.position.x : child.position.x;
+    const boxLeft = anchorX - EXCLUSION_OFFSET_X - EXCLUSION_WIDTH;
+    minLeft = minLeft === undefined ? boxLeft : Math.min(minLeft, boxLeft);
+  });
+  return minLeft;
+}
 
 function nodeWidth(node: GraphState['nodes'][string]): number {
   return (node as unknown as { __layoutWidth?: number }).__layoutWidth ?? BOX_WIDTH;
@@ -38,9 +121,26 @@ interface CanvasMetrics {
   height: number;
   centerX: number;
   verticalOffset: number;
+  minNodeLeft: number;
 }
-export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCreateBelow, onBranch, onRemove }) => {
+export const Canvas: React.FC<CanvasProps> = ({
+  graph,
+  settings,
+  onSelect,
+  onCreateBelow,
+  onBranch,
+  onRemove,
+  onAdjustPhase,
+}) => {
   const nodesOrdered = useMemo(() => orderNodes(graph), [graph]);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [dragState, setDragState] = useState<{
+    phaseId: string;
+    handle: 'top' | 'bottom';
+    pointerId: number;
+    startNodeId: NodeId;
+    endNodeId: NodeId;
+  } | null>(null);
 
   const metrics = useMemo(() => {
     if (!nodesOrdered.length) {
@@ -50,11 +150,13 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
         centerX: 480,
         verticalOffset: CANVAS_MARGIN / 2,
         minX: 0,
+        minNodeLeft: -BOX_WIDTH / 2,
       };
     }
     let minX = Infinity;
     let maxX = -Infinity;
     let maxBottom = 0;
+    let minNodeLeft = Infinity;
     const exclusionReach = EXCLUSION_OFFSET_X + EXCLUSION_WIDTH;
     nodesOrdered.forEach((node) => {
       const width = nodeWidth(node);
@@ -66,7 +168,11 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
       minX = Math.min(minX, center - halfWidth - exclusionReach);
       maxX = Math.max(maxX, center + halfWidth + exclusionReach);
       maxBottom = Math.max(maxBottom, bottom);
+      minNodeLeft = Math.min(minNodeLeft, center - halfWidth);
     });
+    if (Number.isFinite(minNodeLeft)) {
+      minX = Math.min(minX, minNodeLeft - (PHASE_WIDTH + PHASE_GAP));
+    }
     const width = Math.max(960, maxX - minX + CANVAS_MARGIN);
     const centerX = -minX + CANVAS_MARGIN / 2;
     const height = maxBottom + CANVAS_MARGIN;
@@ -76,14 +182,111 @@ export const Canvas: React.FC<CanvasProps> = ({ graph, settings, onSelect, onCre
       centerX,
       verticalOffset: CANVAS_MARGIN / 2,
       minX,
+      minNodeLeft: Number.isFinite(minNodeLeft) ? minNodeLeft : -BOX_WIDTH / 2,
     };
   }, [nodesOrdered, settings.countFormat]);
 
 const intervalEntries = useMemo(() => Object.values(graph.intervals), [graph.intervals]);
 
+  const phaseAnchors = useMemo(() => {
+    const anchorMap = new Map<NodeId, { top: number; bottom: number }>();
+    nodesOrdered
+      .filter((node) => node.column === 0)
+      .forEach((node) => {
+        const top = metrics.verticalOffset + node.position.y;
+        const bottom = top + nodeHeight(node, settings);
+        anchorMap.set(node.id, { top, bottom });
+      });
+    return anchorMap;
+  }, [metrics.verticalOffset, nodesOrdered, settings]);
+
+  const leftExclusionBound = useMemo(() => computeLeftExclusionBound(graph, settings), [graph, settings.countFormat, settings.freeEdit]);
+
+  const phaseRailX = useMemo(() => {
+    const diagramLeft = leftExclusionBound !== undefined ? Math.min(metrics.minNodeLeft, leftExclusionBound) : metrics.minNodeLeft;
+    const offset = metrics.centerX + diagramLeft - PHASE_GAP - PHASE_WIDTH;
+    return Number.isFinite(offset) ? offset : metrics.centerX - PHASE_WIDTH - PHASE_GAP;
+  }, [leftExclusionBound, metrics.centerX, metrics.minNodeLeft]);
+
+  const snapNodeId = (value: number, mode: 'top' | 'bottom'): NodeId | undefined => {
+    const entries = [...phaseAnchors.entries()];
+    if (!entries.length) {
+      return undefined;
+    }
+    let bestId = entries[0][0];
+    let bestDiff = Math.abs(value - (mode === 'top' ? entries[0][1].top : entries[0][1].bottom));
+    for (let index = 1; index < entries.length; index += 1) {
+      const [id, anchor] = entries[index];
+      const target = mode === 'top' ? anchor.top : anchor.bottom;
+      const diff = Math.abs(value - target);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestId = id;
+      }
+    }
+    return bestId;
+  };
+
+  const getPointerY = (event: React.PointerEvent<SVGRectElement>): number => {
+    const svgElement = svgRef.current;
+    if (!svgElement) {
+      return 0;
+    }
+    const bounds = svgElement.getBoundingClientRect();
+    return event.clientY - bounds.top;
+  };
+
+  const handleDragMove = (event: React.PointerEvent<SVGRectElement>) => {
+    const pointerId = event.pointerId;
+    event.preventDefault();
+    const pointerY = getPointerY(event);
+    setDragState((state) => {
+      if (!state || state.pointerId !== pointerId) {
+        return state;
+      }
+      const snappedId = snapNodeId(pointerY, state.handle);
+      if (!snappedId) {
+        return state;
+      }
+      if (state.handle === 'top') {
+        const endAnchor = phaseAnchors.get(state.endNodeId);
+        const snappedAnchor = phaseAnchors.get(snappedId);
+        if (endAnchor && snappedAnchor && snappedAnchor.top > endAnchor.bottom) {
+          return state;
+        }
+        if (snappedId === state.startNodeId) {
+          return state;
+        }
+        return { ...state, startNodeId: snappedId };
+      }
+      const startAnchor = phaseAnchors.get(state.startNodeId);
+      const snappedAnchor = phaseAnchors.get(snappedId);
+      if (startAnchor && snappedAnchor && snappedAnchor.bottom < startAnchor.top) {
+        return state;
+      }
+      if (snappedId === state.endNodeId) {
+        return state;
+      }
+      return { ...state, endNodeId: snappedId };
+    });
+  };
+
+  const handleDragEnd = (event: React.PointerEvent<SVGRectElement>) => {
+    const pointerId = event.pointerId;
+    const target = event.currentTarget;
+    setDragState((state) => {
+      if (!state || state.pointerId !== pointerId) {
+        return state;
+      }
+      target.releasePointerCapture(pointerId);
+      onAdjustPhase(state.phaseId, state.startNodeId, state.endNodeId);
+      return null;
+    });
+  };
+
   return (
     <div className="canvas-container">
-      <svg className="canvas-svg" width={metrics.width} height={metrics.height}>
+      <svg ref={svgRef} className="canvas-svg" width={metrics.width} height={metrics.height}>
         <defs>
           <marker
             id="arrowhead"
@@ -106,6 +309,34 @@ const intervalEntries = useMemo(() => Object.values(graph.intervals), [graph.int
             metrics,
           })
         )}
+
+        {renderPhases({
+          graph,
+          onSelect,
+          railX: phaseRailX,
+          anchors: phaseAnchors,
+          dragState,
+          onHandlePointerDown: (phase, handle) => (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            const target = event.currentTarget;
+            target.setPointerCapture(event.pointerId);
+            const activePhase = phase;
+            if (!activePhase) {
+              return;
+            }
+            onSelect(activePhase.id);
+            setDragState({
+              phaseId: activePhase.id,
+              handle,
+              pointerId: event.pointerId,
+              startNodeId: dragState?.phaseId === activePhase.id ? dragState.startNodeId : activePhase.startNodeId,
+              endNodeId: dragState?.phaseId === activePhase.id ? dragState.endNodeId : activePhase.endNodeId,
+            });
+          },
+          onHandlePointerMove: handleDragMove,
+          onHandlePointerUp: handleDragEnd,
+        })}
 
         {nodesOrdered.map((node) =>
           renderNode({
@@ -157,56 +388,13 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
   const childIndex = parentChildren.indexOf(child.id);
   const totalChildren = parentChildren.length;
   const isBranchChild = totalChildren > 1;
-  const hasVisibleExclusion = (() => {
-    const exclusion = interval.exclusion;
-    if (!exclusion) {
-      return false;
-    }
-    if (exclusion.label && exclusion.label.trim() && exclusion.label.trim() !== 'Excluded') {
-      return true;
-    }
-    if (exclusion.totalOverride && exclusion.totalOverride.trim().length > 0) {
-      return true;
-    }
-    if (exclusion.total != null && exclusion.total !== 0) {
-      return true;
-    }
-    if (exclusion.reasons.some((reason) => {
-      if (reason.kind === 'user') {
-        return true;
-      }
-      if (reason.countOverride && reason.countOverride.trim().length > 0) {
-        return true;
-      }
-      return reason.n != null && reason.n !== 0;
-    })) {
-      return true;
-    }
-    return false;
-  })();
-  const allowExclusion = totalChildren <= 1 || hasVisibleExclusion;
+  const visibleExclusion = hasVisibleExclusion(interval);
+  const allowExclusion = totalChildren <= 1 || visibleExclusion;
   const parentWidth = nodeWidth(parent);
   const childWidth = nodeWidth(child);
 
   const inheritedSide = (child as unknown as { __branchSide?: 'left' | 'right' }).__branchSide;
-  const determineExclusionSide = (): 'left' | 'right' => {
-    if (inheritedSide) {
-      return inheritedSide;
-    }
-    if (isBranchChild) {
-      const threshold = totalChildren / 2;
-      return childIndex < threshold ? 'left' : 'right';
-    }
-    if (childCenterX < parentCenterX - 0.1) {
-      return 'left';
-    }
-    if (childCenterX > parentCenterX + 0.1) {
-      return 'right';
-    }
-    return 'right';
-  };
-
-  const exclusionSide = determineExclusionSide();
+  const exclusionSide = resolveExclusionSide(parent.position.x, child.position.x, totalChildren, childIndex, inheritedSide);
 
   const isStraight = !isBranchChild || Math.abs(parentCenterX - childCenterX) < 0.1;
   const gap = Math.max(0, childTop - parentBottomY);
@@ -262,6 +450,121 @@ function renderInterval({ interval, graph, settings, onSelect, metrics }: Render
       })}
     </g>
   );
+}
+
+const PHASE_HANDLE_SIZE = 12;
+
+type PhaseAnchorsMap = Map<NodeId, { top: number; bottom: number }>;
+
+interface RenderPhasesProps {
+  graph: GraphState;
+  onSelect: (id: string | undefined) => void;
+  railX: number;
+  anchors: PhaseAnchorsMap;
+  dragState: {
+    phaseId: string;
+    handle: 'top' | 'bottom';
+    pointerId: number;
+    startNodeId: NodeId;
+    endNodeId: NodeId;
+  } | null;
+  onHandlePointerDown: (phase: PhaseBox, handle: 'top' | 'bottom') => (event: React.PointerEvent<SVGRectElement>) => void;
+  onHandlePointerMove: (event: React.PointerEvent<SVGRectElement>) => void;
+  onHandlePointerUp: (event: React.PointerEvent<SVGRectElement>) => void;
+}
+
+function renderPhases({
+  graph,
+  onSelect,
+  railX,
+  anchors,
+  dragState,
+  onHandlePointerDown,
+  onHandlePointerMove,
+  onHandlePointerUp,
+}: RenderPhasesProps) {
+  const phases = graph.phases ?? [];
+  if (!phases.length || anchors.size === 0) {
+    return null;
+  }
+  return phases.map((phase) => {
+    const activeState = dragState && dragState.phaseId === phase.id ? dragState : null;
+    const startAnchor = anchors.get(activeState?.startNodeId ?? phase.startNodeId);
+    const endAnchor = anchors.get(activeState?.endNodeId ?? phase.endNodeId);
+    if (!startAnchor || !endAnchor) {
+      return null;
+    }
+    const topY = startAnchor.top;
+    const bottomY = Math.max(endAnchor.bottom, topY + 1);
+    const height = bottomY - topY;
+    const isSelected = graph.selectedId === phase.id;
+    const rectX = railX;
+    const rectWidth = PHASE_WIDTH;
+    const textCenterX = rectX + rectWidth / 2;
+    const textCenterY = topY + height / 2;
+    const label = phase.label?.trim().length ? phase.label : 'Phase';
+    const lines = label.split(/\n+/);
+
+    return (
+      <g
+        key={phase.id}
+        className={classNames('phase-box', { selected: isSelected })}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(phase.id);
+        }}
+      >
+        <rect
+          x={rectX}
+          y={topY}
+          width={rectWidth}
+          height={height}
+          rx={8}
+          ry={8}
+          fill="#fff"
+          stroke={isSelected ? '#0057ff' : '#111'}
+          strokeWidth={isSelected ? 3 : 2}
+        />
+        <text
+          className="phase-text"
+          x={textCenterX}
+          y={textCenterY}
+          textAnchor="middle"
+          transform={`rotate(-90 ${textCenterX} ${textCenterY})`}
+        >
+          {lines.map((line, index) => (
+            <tspan key={index} x={textCenterX} dy={index === 0 ? 0 : LINE_HEIGHT}>
+              {line}
+            </tspan>
+          ))}
+        </text>
+        {isSelected && (
+          <>
+            <rect
+              className="phase-handle"
+              x={textCenterX - PHASE_HANDLE_SIZE / 2}
+              y={topY - PHASE_HANDLE_SIZE / 2}
+              width={PHASE_HANDLE_SIZE}
+              height={PHASE_HANDLE_SIZE}
+              onPointerDown={onHandlePointerDown(phase, 'top')}
+              onPointerMove={onHandlePointerMove}
+              onPointerUp={onHandlePointerUp}
+            />
+            <rect
+              className="phase-handle"
+              x={textCenterX - PHASE_HANDLE_SIZE / 2}
+              y={bottomY - PHASE_HANDLE_SIZE / 2}
+              width={PHASE_HANDLE_SIZE}
+              height={PHASE_HANDLE_SIZE}
+              onPointerDown={onHandlePointerDown(phase, 'bottom')}
+              onPointerMove={onHandlePointerMove}
+              onPointerUp={onHandlePointerUp}
+            />
+          </>
+        )}
+      </g>
+    );
+  });
 }
 
 interface RenderNodeProps {

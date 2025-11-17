@@ -3,6 +3,7 @@ import { persist, subscribeWithSelector } from 'zustand/middleware';
 import { AppSettings, CountFormat, GraphState, IntervalId, NodeId, PersistedProject } from '../model/types';
 import {
   addNodeBelow,
+  addPhase,
   createInitialGraph,
   navigateSelection,
   recomputeGraph,
@@ -18,6 +19,9 @@ import {
   updateExclusionReasonCount,
   removeExclusionReason,
   removeNode,
+  updatePhaseLabel,
+  updatePhaseBounds,
+  removePhase,
 } from '../model/graph';
 
 interface HistorySnapshot {
@@ -53,6 +57,10 @@ interface AppStore {
     ) => void;
     removeExclusionReason: (intervalId: IntervalId, reasonId: string) => void;
     removeNode: (nodeId: NodeId) => void;
+    addPhase: () => void;
+    updatePhaseLabel: (phaseId: string, label: string) => void;
+    updatePhaseBounds: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
+    removePhase: (phaseId: string) => void;
     toggleAutoCalc: () => void;
     toggleArrowsGlobal: () => void;
     toggleCountFormat: () => void;
@@ -137,6 +145,38 @@ export const useAppStore = create<AppStore>()(
                 }
                 return recomputeGraph(nextGraph, state.settings);
               })(),
+              history: pushHistory(state.history, prev),
+            }));
+          },
+          addPhase: () => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => ({
+              ...state,
+              graph: addPhase(state.graph),
+              history: pushHistory(state.history, prev),
+            }));
+          },
+          updatePhaseLabel: (phaseId, label) => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => ({
+              ...state,
+              graph: updatePhaseLabel(state.graph, phaseId, label),
+              history: pushHistory(state.history, prev),
+            }));
+          },
+          updatePhaseBounds: (phaseId, startNodeId, endNodeId) => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => ({
+              ...state,
+              graph: updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId),
+              history: pushHistory(state.history, prev),
+            }));
+          },
+          removePhase: (phaseId) => {
+            const prev = cloneSnapshot(get().graph, get().settings);
+            set((state) => ({
+              ...state,
+              graph: removePhase(state.graph, phaseId),
               history: pushHistory(state.history, prev),
             }));
           },
@@ -399,9 +439,17 @@ export const useAppStore = create<AppStore>()(
           if (typeof mergedSettings.helpEnabled !== 'boolean') {
             mergedSettings.helpEnabled = true;
           }
+          const mergedGraph = {
+            ...currentState.graph,
+            ...(persisted?.graph ?? {}),
+          } as GraphState;
+          if (!Array.isArray(mergedGraph.phases)) {
+            mergedGraph.phases = [];
+          }
           return {
             ...currentState,
             ...persisted,
+            graph: mergedGraph,
             settings: mergedSettings,
           } satisfies AppStore;
         },
