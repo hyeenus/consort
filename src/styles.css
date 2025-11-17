@@ -235,3 +235,72 @@ body {
 .add-reason:hover {
   border-color: #999;
 }
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 17, 17, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 40;
+}
+
+.help-dialog {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 20px 45px rgba(17, 17, 17, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.help-dialog h2 {
+  margin-top: 4px;
+  margin-bottom: 0;
+  font-size: 22px;
+}
+
+.help-body {
+  font-size: 15px;
+  color: #1a1a1a;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.help-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.help-actions button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #c7c7c7;
+  background: #f7f7f7;
+  cursor: pointer;
+}
+
+.help-actions button:hover {
+  border-color: #999;
+}
+
+.help-disable {
+  background: #fff2f2;
+  border-color: #f0b3b3;
+  color: #a82222;
+}
+
+.help-tag {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666;
+}

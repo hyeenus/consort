@@ -16,6 +16,7 @@ interface ToolbarProps {
   onExportJson: () => void;
   onImportJson: (file: File) => void;
   onReset: () => void;
+  onToggleHelp: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -32,6 +33,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onExportJson,
   onImportJson,
   onReset,
+  onToggleHelp,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -56,6 +58,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
         <button type="button" onClick={onToggleFreeEdit}>
           {settings.freeEdit ? 'Exit Free Edit' : 'Free Edit'}
+        </button>
+        <button type="button" onClick={onToggleHelp}>
+          Help {settings.helpEnabled ? 'On' : 'Off'}
         </button>
         <button type="button" onClick={onReset}>
           Reset
