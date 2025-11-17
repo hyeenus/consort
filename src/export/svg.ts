@@ -326,7 +326,7 @@ export function generateSvg(graph: GraphState, settings: AppSettings): string {
 
     svgParts.push(
       `<rect x="${phaseRailX}" y="${topY}" width="${PHASE_WIDTH}" height="${phaseHeight}" rx="8" ry="8" fill="#ffffff" stroke="#111111" stroke-width="2" />`,
-      `<text x="${textX}" y="${textY}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" transform="rotate(-90 ${textX} ${textY})">`
+      `<text x="${textX}" y="${textY}" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#111111" transform="rotate(-90 ${textX} ${textY})">`
     );
     lines.forEach((line, index) => {
       const dy = index === 0 ? 0 : LINE_HEIGHT;
