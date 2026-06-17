@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { addNodeBelow, createInitialGraph, navigateSelection, recomputeGraph, setSelected } from '../model/graph';
 import { AppSettings } from '../model/types';
+import { DEFAULT_STYLE } from '../model/style';
 
-const autoSettings: AppSettings = { autoCalc: true, arrowsGlobal: true, countFormat: 'upper', freeEdit: false };
+const autoSettings: AppSettings = { autoCalc: true, freeEdit: false, helpEnabled: true, style: DEFAULT_STYLE };
 
 describe('keyboard navigation helpers', () => {
   it('moves from node to child node when navigating down', () => {

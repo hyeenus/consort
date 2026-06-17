@@ -1,18 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { formatCount, parseCount } from '../model/numbers';
+import { formatCount, formatInteger, parseCount } from '../model/numbers';
+import { DEFAULT_STYLE, DiagramStyle } from '../model/style';
+
+const styleN: DiagramStyle = { ...DEFAULT_STYLE, numberStyle: 'N', thousandsSep: 'space' };
+const styleLower: DiagramStyle = { ...DEFAULT_STYLE, numberStyle: 'n', thousandsSep: 'space' };
+const stylePlain: DiagramStyle = { ...DEFAULT_STYLE, numberStyle: 'plain', thousandsSep: 'comma' };
 
 describe('formatCount', () => {
-  it('formats numbers with spaces every three digits by default', () => {
-    expect(formatCount(12345)).toBe('N = 12 345');
+  it('formats with N and space separator', () => {
+    expect(formatCount(12345, styleN)).toBe('N = 12 345');
   });
 
-  it('formats numbers with parenthetical style when requested', () => {
-    expect(formatCount(12345, 'parenthetical')).toBe('(n = 12 345)');
+  it('supports lowercase n', () => {
+    expect(formatCount(12345, styleLower)).toBe('n = 12 345');
   });
 
-  it('returns dash placeholder for null', () => {
-    expect(formatCount(null)).toBe('N = —');
-    expect(formatCount(null, 'parenthetical')).toBe('(n = —)');
+  it('supports plain numbers with comma separator', () => {
+    expect(formatCount(12345, stylePlain)).toBe('12,345');
+  });
+
+  it('returns a dash placeholder for null', () => {
+    expect(formatCount(null, styleN)).toBe('N = —');
+  });
+});
+
+describe('formatInteger', () => {
+  it('groups thousands with the chosen separator', () => {
+    expect(formatInteger(1234567, 'space')).toBe('1 234 567');
+    expect(formatInteger(1234567, 'comma')).toBe('1,234,567');
+    expect(formatInteger(1234567, 'none')).toBe('1234567');
   });
 });
 

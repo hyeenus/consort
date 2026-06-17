@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../state/useStore';
 import { getSelectionKind, orderNodes } from '../model/graph';
-import { GraphState, AppSettings, ExclusionReasonKind, NodeId } from '../model/types';
-import { formatCount, formatInteger, parseCount } from '../model/numbers';
-import { useHelp } from '../help/HelpContext';
+import { ExclusionReasonKind, NodeId } from '../model/types';
+import { formatCount, formatNumber, parseCount } from '../model/numbers';
 
 interface ReasonDraft {
   id: string;
@@ -12,214 +11,111 @@ interface ReasonDraft {
   kind: ExclusionReasonKind;
 }
 
-interface InspectorProps {
-  graph: GraphState;
-  settings: AppSettings;
-  onUpdatePhaseLabel: (phaseId: string, label: string) => void;
-  onRemovePhase: (phaseId: string) => void;
-  onAdjustPhase: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
-}
+export const Inspector: React.FC = () => {
+  const graph = useAppStore((state) => state.graph);
+  const settings = useAppStore((state) => state.settings);
+  const actions = useAppStore((state) => state.actions);
+  const style = settings.style;
 
-export const Inspector: React.FC<InspectorProps> = ({ graph, settings, onUpdatePhaseLabel, onRemovePhase, onAdjustPhase }) => {
-  const {
-    updateNodeText,
-    updateNodeCount,
-    updateExclusionLabel,
-    updateExclusionCount,
-    addExclusionReason,
-    updateExclusionReasonLabel,
-    updateExclusionReasonCount,
-    removeExclusionReason,
-  } = useAppStore((state) => state.actions);
   const selectionKind = useMemo(() => getSelectionKind(graph), [graph]);
   const selectedId = graph.selectedId;
+  const mainFlowNodes = useMemo(() => orderNodes(graph).filter((node) => node.column === 0), [graph]);
+
   const [textValue, setTextValue] = useState('');
   const [countValue, setCountValue] = useState('');
   const [exclusionLabel, setExclusionLabel] = useState('');
   const [exclusionCount, setExclusionCount] = useState('');
   const [reasonDrafts, setReasonDrafts] = useState<ReasonDraft[]>([]);
-  const [isEditingReasons, setIsEditingReasons] = useState(false);
+  const [editingReasons, setEditingReasons] = useState(false);
   const [phaseLabel, setPhaseLabel] = useState('');
-  const [phaseStartId, setPhaseStartId] = useState<NodeId | ''>('');
-  const [phaseEndId, setPhaseEndId] = useState<NodeId | ''>('');
-
-  const {
-    updateLabel: updateReasonDraftLabel,
-    updateCount: updateReasonDraftCount,
-    getLabel: getReasonDraftLabel,
-    getCount: getReasonDraftCount,
-  } = createReasonDraftHelpers(reasonDrafts, setReasonDrafts);
-
-  const nodes = graph.nodes;
-  const intervals = graph.intervals;
-  const { requestHelp, helpEnabled } = useHelp();
-  const mainFlowNodes = useMemo(() => orderNodes(graph).filter((node) => node.column === 0), [graph]);
 
   useEffect(() => {
     if (selectionKind === 'node' && selectedId) {
-      if (isEditingReasons) {
-        setIsEditingReasons(false);
-      }
-      const node = nodes[selectedId];
-      if (!node) {
-        return;
-      }
+      setEditingReasons(false);
+      const node = graph.nodes[selectedId];
+      if (!node) return;
       const nextText = node.textLines.join('\n');
       setTextValue((current) => (current === nextText ? current : nextText));
       const nextCount = settings.freeEdit
-        ? node.countOverride ?? formatCount(node.n, settings.countFormat)
+        ? node.countOverride ?? formatCount(node.n, style)
         : node.n != null
         ? String(node.n)
         : '';
       setCountValue((current) => (current === nextCount ? current : nextCount));
       return;
     }
-
     if (selectionKind === 'interval' && selectedId) {
-      const interval = intervals[selectedId];
-      if (!interval) {
-        return;
-      }
+      const interval = graph.intervals[selectedId];
+      if (!interval) return;
       const exclusion = interval.exclusion ?? { label: 'Excluded', total: null, reasons: [] };
       const nextLabel = exclusion.label ?? 'Excluded';
       setExclusionLabel((current) => (current === nextLabel ? current : nextLabel));
-
-      const nextExcludedCount = settings.freeEdit
-        ? exclusion.totalOverride ?? formatCount(exclusion.total, settings.countFormat)
+      const nextCount = settings.freeEdit
+        ? exclusion.totalOverride ?? formatCount(exclusion.total, style)
         : exclusion.total != null
         ? String(exclusion.total)
         : '';
-      setExclusionCount((current) => (current === nextExcludedCount ? current : nextExcludedCount));
-
-      const nextDrafts = (exclusion.reasons ?? [])
-        .filter((reason) => {
-          if (!settings.freeEdit) {
-            return !(reason.kind === 'auto' && (!reason.n || reason.n === 0));
-          }
-          if (reason.kind === 'auto') {
-            return Boolean(reason.countOverride && reason.countOverride.trim().length > 0);
-          }
-          return true;
-        })
-        .map((reason) => ({
-          id: reason.id,
-          label: reason.label,
-          count: settings.freeEdit
-            ? reason.countOverride ?? (reason.n != null ? formatInteger(reason.n) : '—')
-            : reason.n != null
-            ? String(reason.n)
-            : '',
-          kind: reason.kind,
-        }));
-
-      if (!isEditingReasons) {
-        setReasonDrafts((current) => (areDraftsEqual(current, nextDrafts) ? current : nextDrafts));
+      setExclusionCount((current) => (current === nextCount ? current : nextCount));
+      if (!editingReasons) {
+        const drafts = (exclusion.reasons ?? [])
+          .filter((reason) => {
+            if (!settings.freeEdit) {
+              return !(reason.kind === 'auto' && (!reason.n || reason.n === 0));
+            }
+            if (reason.kind === 'auto') {
+              return Boolean(reason.countOverride && reason.countOverride.trim().length > 0);
+            }
+            return true;
+          })
+          .map((reason) => ({
+            id: reason.id,
+            label: reason.label,
+            count: settings.freeEdit
+              ? reason.countOverride ?? (reason.n != null ? formatNumber(reason.n, style) : '')
+              : reason.n != null
+              ? String(reason.n)
+              : '',
+            kind: reason.kind,
+          }));
+        setReasonDrafts((current) => (draftsEqual(current, drafts) ? current : drafts));
       }
       return;
     }
-
-    if (selectionKind === undefined) {
-      if (isEditingReasons) {
-        setIsEditingReasons(false);
-      }
-      setTextValue('');
-      setCountValue('');
-      setExclusionLabel('');
-      setExclusionCount('');
-      setReasonDrafts([]);
-      setPhaseLabel('');
-      setPhaseStartId('');
-      setPhaseEndId('');
-    }
-
     if (selectionKind === 'phase' && selectedId) {
       const phase = (graph.phases ?? []).find((item) => item.id === selectedId);
       if (phase) {
         setPhaseLabel((current) => (current === phase.label ? current : phase.label));
-        setPhaseStartId(phase.startNodeId);
-        setPhaseEndId(phase.endNodeId);
       }
     }
-  }, [selectionKind, selectedId, nodes, intervals, isEditingReasons, settings]);
-
-  useEffect(() => {
-    if (!helpEnabled) {
-      return;
-    }
-    if (selectionKind === 'node' && selectedId) {
-      requestHelp('inspector-node', {
-        title: 'Editing a box',
-        body: (
-          <p>
-            Update the headline text and patient count here. Counts follow upstream totals automatically so everyone is
-            accounted for—unless you switch to free edit or change the numbers in earlier boxes.
-          </p>
-        ),
-      });
-    }
-    if (selectionKind === 'interval' && selectedId) {
-      const interval = intervals[selectedId];
-      const parent = interval ? graph.nodes[interval.parentId] : undefined;
-      const parentChildren = parent?.childIds ?? [];
-      const canEditExclusion = parentChildren.length <= 1;
-      if (interval && canEditExclusion) {
-        requestHelp('inspector-interval', {
-          title: 'Editing exclusions',
-          body: (
-            <p>
-              Connections can explain how many people leave the flow. Add a label and excluded total, then break the
-              total into reason rows if you need detail.
-            </p>
-          ),
-        });
-      }
-    }
-  }, [graph.nodes, helpEnabled, intervals, requestHelp, selectionKind, selectedId]);
+  }, [selectionKind, selectedId, graph, settings, style, editingReasons]);
 
   if (!selectedId || !selectionKind) {
     return (
-      <aside className="inspector empty">
-        <h3>Inspector</h3>
-        <p>Select a box or connection to edit its details.</p>
-      </aside>
+      <div className="inspector-empty">
+        <p>Select a box, connection, or phase to edit it.</p>
+        <p className="panel-hint">Tip: drag a box to fine-tune its position. Scroll to zoom.</p>
+      </div>
     );
   }
 
   if (selectionKind === 'phase') {
     const phase = (graph.phases ?? []).find((item) => item.id === selectedId);
-    if (!phase) {
-      return null;
-    }
-    const handlePhaseLabelBlur = () => {
+    if (!phase) return null;
+    const commitLabel = () => {
       const trimmed = phaseLabel.trim().length ? phaseLabel : 'Phase';
-      onUpdatePhaseLabel(phase.id, trimmed);
+      actions.updatePhaseLabel(phase.id, trimmed);
       setPhaseLabel(trimmed);
     };
-    const currentStart = phaseStartId || phase.startNodeId;
-    const currentEnd = phaseEndId || phase.endNodeId;
-
     return (
-      <aside className="inspector">
-        <h3>Phase Label</h3>
-        <label className="field">
-          <span>Text</span>
-          <input
-            type="text"
-            value={phaseLabel}
-            onChange={(event) => setPhaseLabel(event.target.value)}
-            onBlur={handlePhaseLabelBlur}
-          />
-        </label>
-        <label className="field">
-          <span>Top aligns with</span>
+      <div className="inspector-body">
+        <h3>Phase label</h3>
+        <Field label="Text">
+          <input value={phaseLabel} onChange={(event) => setPhaseLabel(event.target.value)} onBlur={commitLabel} />
+        </Field>
+        <Field label="Top aligns with">
           <select
-            value={currentStart}
-            disabled={!mainFlowNodes.length}
-            onChange={(event) => {
-              const next = event.target.value as NodeId;
-              setPhaseStartId(next);
-              onAdjustPhase(phase.id, next, currentEnd);
-            }}
+            value={phase.startNodeId}
+            onChange={(event) => actions.updatePhaseBounds(phase.id, event.target.value as NodeId, phase.endNodeId)}
           >
             {mainFlowNodes.map((node) => (
               <option key={node.id} value={node.id}>
@@ -227,17 +123,11 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, onUpdateP
               </option>
             ))}
           </select>
-        </label>
-        <label className="field">
-          <span>Bottom aligns with</span>
+        </Field>
+        <Field label="Bottom aligns with">
           <select
-            value={currentEnd}
-            disabled={!mainFlowNodes.length}
-            onChange={(event) => {
-              const next = event.target.value as NodeId;
-              setPhaseEndId(next);
-              onAdjustPhase(phase.id, currentStart, next);
-            }}
+            value={phase.endNodeId}
+            onChange={(event) => actions.updatePhaseBounds(phase.id, phase.startNodeId, event.target.value as NodeId)}
           >
             {mainFlowNodes.map((node) => (
               <option key={node.id} value={node.id}>
@@ -245,134 +135,78 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, onUpdateP
               </option>
             ))}
           </select>
-        </label>
-        <button
-          type="button"
-          onClick={() => onRemovePhase(phase.id)}
-          style={{ marginTop: 12 }}
-        >
-          Remove Phase
+        </Field>
+        <button type="button" className="danger-button" onClick={() => actions.removePhase(phase.id)}>
+          Remove phase
         </button>
-      </aside>
+      </div>
     );
   }
 
   if (selectionKind === 'node') {
     const node = graph.nodes[selectedId];
-    if (!node) {
-      return null;
-    }
-    const commitNodeCount = () =>
-      updateNodeCount(
-        selectedId,
-        parseCount(countValue),
-        settings.freeEdit ? countValue : undefined
-      );
+    if (!node) return null;
+    const commitCount = () =>
+      actions.updateNodeCount(selectedId, parseCount(countValue), settings.freeEdit ? countValue : undefined);
     return (
-      <aside className="inspector">
-        <h3>Box Details</h3>
-        <label className="field">
-          <span>Text</span>
-          <textarea
-            rows={6}
-            value={textValue}
-            onChange={(event) => setTextValue(event.target.value)}
-            onBlur={() => updateNodeText(selectedId, normalizeText(textValue))}
-          />
-        </label>
-        <label className="field">
-          <span>Patient Count</span>
+      <div className="inspector-body">
+        <h3>Box</h3>
+        <Field label="Text (one line each)">
+          <textarea rows={5} value={textValue} onChange={(event) => setTextValue(event.target.value)} onBlur={() => actions.updateNodeText(selectedId, normalizeText(textValue))} />
+        </Field>
+        <Field label="Patient count">
           <input
             type={settings.freeEdit ? 'text' : 'number'}
-            inputMode={settings.freeEdit ? undefined : 'numeric'}
+            inputMode="numeric"
             value={countValue}
             onChange={(event) => setCountValue(event.target.value)}
-            onBlur={commitNodeCount}
+            onBlur={commitCount}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
-                commitNodeCount();
+                commitCount();
               }
             }}
           />
-          {!settings.freeEdit ? (
-            <small className="hint">Shown as {formatCount(parseCount(countValue), settings.countFormat)}</small>
-          ) : null}
-        </label>
-      </aside>
+          {!settings.freeEdit && <small className="hint">Shown as {formatCount(parseCount(countValue), style)}</small>}
+        </Field>
+        {node.manualOffset && (
+          <button type="button" className="ghost-button" onClick={() => actions.resetNodePosition(selectedId)}>
+            Reset position
+          </button>
+        )}
+      </div>
     );
   }
 
   const interval = graph.intervals[selectedId];
-  if (!interval) {
-    return null;
-  }
+  if (!interval) return null;
+  const parent = graph.nodes[interval.parentId];
+  const isBranch = (parent?.childIds?.length ?? 0) > 1;
 
-  const parentForInterval = graph.nodes[interval.parentId];
-  const parentChildren = parentForInterval?.childIds ?? [];
-  const canEditExclusion = parentChildren.length <= 1;
-
-  if (!canEditExclusion) {
+  if (isBranch) {
     return (
-      <aside className="inspector">
-        <h3>Exclusion Details</h3>
-        <p className="hint">Branch exclusions update automatically when totals are missing.</p>
-        <label className="field">
-          <span>Label</span>
-          <input type="text" value={exclusionLabel} readOnly />
-        </label>
-        <label className="field">
-          <span>Excluded Count</span>
-          <input type="text" value={exclusionCount} readOnly />
-        </label>
-        {!settings.freeEdit ? (
-          <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
-        ) : null}
-      </aside>
+      <div className="inspector-body">
+        <h3>Branch connection</h3>
+        <p className="panel-hint">Branch splits balance automatically. Edit each arm’s count on its box.</p>
+        {!settings.freeEdit && <p className="delta-summary">Δ between boxes: {formatDelta(interval.delta)}</p>}
+      </div>
     );
   }
 
   const commitExclusionCount = () =>
-    updateExclusionCount(
-      selectedId,
-      parseCount(exclusionCount),
-      settings.freeEdit ? exclusionCount : undefined
-    );
-
-  const explainReasons = () =>
-    requestHelp('exclusion-reasons', {
-      title: 'Working with exclusion rows',
-      body: (
-        <>
-          <p>
-            Each row should explain a reason for leaving the study. The total should equal the excluded count unless you
-            intentionally diverge in free edit mode.
-          </p>
-          <p>
-            The automatic Other row remains visible until every participant is accounted for or you rename it to a
-            specific reason.
-          </p>
-        </>
-      ),
-    });
+    actions.updateExclusionCount(selectedId, parseCount(exclusionCount), settings.freeEdit ? exclusionCount : undefined);
 
   return (
-    <aside className="inspector">
-      <h3>Exclusion Details</h3>
-      <label className="field">
-        <span>Label</span>
+    <div className="inspector-body">
+      <h3>Exclusion</h3>
+      <Field label="Label">
+        <input value={exclusionLabel} onChange={(event) => setExclusionLabel(event.target.value)} onBlur={() => actions.updateExclusionLabel(selectedId, exclusionLabel)} />
+      </Field>
+      <Field label="Excluded count">
         <input
           type="text"
-          value={exclusionLabel}
-          onChange={(event) => setExclusionLabel(event.target.value)}
-          onBlur={() => updateExclusionLabel(selectedId, exclusionLabel)}
-        />
-      </label>
-      <label className="field">
-        <span>Excluded Count</span>
-        <input
-          type="text"
-          inputMode={settings.freeEdit ? undefined : 'numeric'}
+          inputMode="numeric"
           value={exclusionCount}
           onChange={(event) => setExclusionCount(event.target.value)}
           onBlur={commitExclusionCount}
@@ -383,137 +217,93 @@ export const Inspector: React.FC<InspectorProps> = ({ graph, settings, onUpdateP
             }
           }}
         />
-      </label>
+      </Field>
       <div className="reasons">
+        <span className="reasons-title">Reasons</span>
         {reasonDrafts.map((reason) => {
-          const commitReasonCount = () => {
-            const value = getReasonDraftCount(reason.id);
-            setIsEditingReasons(false);
+          const commitReason = () => {
+            const draft = reasonDrafts.find((item) => item.id === reason.id);
+            const value = draft?.count ?? '';
+            setEditingReasons(false);
             if (settings.freeEdit) {
-              updateExclusionReasonCount(
-                selectedId,
-                reason.id,
-                parseCount(value),
-                value
-              );
+              actions.updateExclusionReasonCount(selectedId, reason.id, parseCount(value), value);
               return;
             }
-            if (reason.kind === 'auto') {
-              return;
-            }
-            updateExclusionReasonCount(selectedId, reason.id, parseCount(value));
+            if (reason.kind === 'auto') return;
+            actions.updateExclusionReasonCount(selectedId, reason.id, parseCount(value));
           };
-
           return (
             <div className="reason-row" key={reason.id}>
-              <div className="field compact reason-title">
-              <span>Title</span>
               <input
-                type="text"
+                className="reason-label"
+                placeholder="Reason"
                 value={reason.label}
-                onChange={(event) => updateReasonDraftLabel(reason.id, event.target.value)}
-                onFocus={() => {
-                  setIsEditingReasons(true);
-                  explainReasons();
-                }}
+                onChange={(event) => setReasonDrafts((current) => current.map((item) => (item.id === reason.id ? { ...item, label: event.target.value } : item)))}
+                onFocusCapture={() => setEditingReasons(true)}
                 onBlur={() => {
-                  setIsEditingReasons(false);
-                  updateExclusionReasonLabel(selectedId, reason.id, getReasonDraftLabel(reason.id));
+                  setEditingReasons(false);
+                  const draft = reasonDrafts.find((item) => item.id === reason.id);
+                  actions.updateExclusionReasonLabel(selectedId, reason.id, draft?.label ?? '');
                 }}
               />
-              </div>
-              <div className="field compact reason-count">
-              <span>Count</span>
               <input
-                type="text"
-                inputMode={settings.freeEdit ? undefined : 'numeric'}
+                className="reason-count"
+                inputMode="numeric"
                 value={reason.count}
-                onChange={(event) => updateReasonDraftCount(reason.id, event.target.value)}
-                onBlur={commitReasonCount}
+                readOnly={reason.kind === 'auto' && !settings.freeEdit}
+                onChange={(event) => setReasonDrafts((current) => current.map((item) => (item.id === reason.id ? { ...item, count: event.target.value } : item)))}
+                onFocus={() => setEditingReasons(true)}
+                onBlur={commitReason}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
-                    commitReasonCount();
+                    commitReason();
                   }
                 }}
-                onFocus={() => {
-                  setIsEditingReasons(true);
-                  explainReasons();
-                }}
-                readOnly={reason.kind === 'auto' && !settings.freeEdit}
               />
-              </div>
               {reason.kind === 'user' ? (
-                <button type="button" className="remove-reason" onClick={() => removeExclusionReason(selectedId, reason.id)}>
-                  Remove
+                <button type="button" className="reason-remove" onClick={() => actions.removeExclusionReason(selectedId, reason.id)} title="Remove reason">
+                  ×
                 </button>
-              ) : null}
+              ) : (
+                <span className="reason-auto" title="Auto remainder">auto</span>
+              )}
             </div>
           );
         })}
-        <button
-          type="button"
-          className="add-reason"
-          onClick={() => {
-            addExclusionReason(selectedId);
-            explainReasons();
-          }}
-        >
-          + Add row
+        <button type="button" className="ghost-button" onClick={() => actions.addExclusionReason(selectedId)}>
+          + Add reason
         </button>
       </div>
-      {!settings.freeEdit ? (
-        <p className="inspector-summary">Δ between boxes: {formatDelta(interval.delta)}</p>
-      ) : null}
-    </aside>
+      {!settings.freeEdit && <p className="delta-summary">Δ between boxes: {formatDelta(interval.delta)}</p>}
+    </div>
   );
 };
 
+const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <label className="field">
+    <span>{label}</span>
+    {children}
+  </label>
+);
+
 function normalizeText(value: string): string[] {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line, index, all) => line.length > 0 || index === all.length - 1);
+  const lines = value.split(/\r?\n/).map((line) => line.replace(/\s+$/u, ''));
+  while (lines.length > 1 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines.length ? lines : [''];
 }
 
 function formatDelta(delta: number): string {
-  if (delta === 0) {
-    return 'balanced';
-  }
+  if (delta === 0) return 'balanced';
   return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
-function createReasonDraftHelpers(
-  reasonDrafts: ReasonDraft[],
-  setReasonDrafts: React.Dispatch<React.SetStateAction<ReasonDraft[]>>
-) {
-  const updateLabel = (id: string, label: string) => {
-    setReasonDrafts((current) => current.map((reason) => (reason.id === id ? { ...reason, label } : reason)));
-  };
-  const updateCount = (id: string, value: string) => {
-    setReasonDrafts((current) =>
-      current.map((reason) => (reason.id === id ? { ...reason, count: value } : reason))
-    );
-  };
-  const getLabel = (id: string) => reasonDrafts.find((reason) => reason.id === id)?.label ?? '';
-  const getCount = (id: string) => reasonDrafts.find((reason) => reason.id === id)?.count ?? '';
-
-  return { updateLabel, updateCount, getLabel, getCount };
-}
-
-function areDraftsEqual(current: ReasonDraft[], next: ReasonDraft[]): boolean {
-  if (current.length !== next.length) {
-    return false;
-  }
-  for (let index = 0; index < current.length; index += 1) {
-    const existing = current[index];
-    const incoming = next[index];
-    if (!incoming) {
-      return false;
-    }
-    if (existing.id !== incoming.id || existing.label !== incoming.label || existing.count !== incoming.count || existing.kind !== incoming.kind) {
-      return false;
-    }
-  }
-  return true;
+function draftsEqual(a: ReasonDraft[], b: ReasonDraft[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => {
+    const other = b[index];
+    return other && item.id === other.id && item.label === other.label && item.count === other.count && item.kind === other.kind;
+  });
 }

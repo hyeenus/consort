@@ -10,10 +10,11 @@ import {
   updateNodeCount,
 } from '../model/graph';
 import { AppSettings } from '../model/types';
+import { DEFAULT_STYLE } from '../model/style';
 
-const autoSettings: AppSettings = { autoCalc: true, arrowsGlobal: true, countFormat: 'upper', freeEdit: false };
-const unlockedSettings: AppSettings = { autoCalc: false, arrowsGlobal: true, countFormat: 'upper', freeEdit: false };
-const freeEditSettings: AppSettings = { autoCalc: true, arrowsGlobal: true, countFormat: 'upper', freeEdit: true };
+const autoSettings: AppSettings = { autoCalc: true, freeEdit: false, helpEnabled: true, style: DEFAULT_STYLE };
+const unlockedSettings: AppSettings = { autoCalc: false, freeEdit: false, helpEnabled: true, style: DEFAULT_STYLE };
+const freeEditSettings: AppSettings = { autoCalc: true, freeEdit: true, helpEnabled: true, style: DEFAULT_STYLE };
 
 describe('graph recalculation', () => {
   it('keeps delta balanced when counts align', () => {

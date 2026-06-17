@@ -1,59 +1,83 @@
-# CONSORT Flowchart Builder (V1)
+# Flowchart Builder — publication-ready patient selection diagrams
 
-Browser-based tool for constructing publication-ready CONSORT-style patient flow diagrams. This repository implements the Version 1 feature set defined in `SPEC.md` and `ROADMAP.md`.
+A browser-based tool for building CONSORT / STROBE-style participant flow diagrams
+for academic papers. It is aimed at retrospective and observational studies in
+emergency medicine, critical care, and anaesthesia (e.g. *SJTREM*, *Resuscitation*,
+*BJA*), and produces clean, black-and-white, vector-quality figures that drop
+straight into a manuscript.
 
-## Using the App
+This branch (`redesign-v2`) is a ground-up rebuild of the original V1 builder. It
+keeps the proven calculation engine (auto-balancing counts, branching, exclusions,
+Δ validation) and rebuilds everything you see and export around a single,
+style-driven rendering pipeline.
 
-- Open the published build at `https://hyeenus.github.io/consort/consort_builder/` (or the project page linked from the repository description).
-- Select boxes on the canvas to edit their text and patient counts in the inspector on the right; the app keeps totals balanced automatically unless you enable Free Edit.
-- Use the toolbar to add steps, switch between arrows/lines, format counts, or export SVG/PNG/JSON snapshots.
-- Contextual help pop-ups appear the first time you use each feature and can be toggled via the Help button in the toolbar.
-- Projects save in your browser automatically; export JSON if you need to move to another device.
+## Why it looks the way it does
 
-### Scripts
+The defaults follow the conventions of highly-rated medical journals:
 
-- `npm run dev` – start the Vite development server
+- **Sharp-cornered rectangles**, thin black borders, white fill, black text — the
+  dominant CONSORT/STROBE house style.
+- **Sans-serif type** — Helvetica or Arial (BMC/Springer and BJA author guidance).
+- **Line weights of 0.5–1.5 pt** and vector output, with raster fall-backs at
+  300 / 600 / 1000 dpi for line-art requirements.
+- **Figure-width presets** of 88 mm (single column), 130 mm (1.5 column), and
+  180 mm (double column), matching Elsevier / Springer / BMC sizing.
+
+## What you can do
+
+- **Start from a template** — STROBE retrospective selection, CONSORT randomised
+  trial, diagnostic / case-control, or PRISMA-style screening.
+- **Apply a journal style preset** — Classic CONSORT, BMC / SJTREM, Elsevier /
+  Resuscitation, BJA (compact), or Modern (slides).
+- **Resize and reshape** from the Format panel — font, font size, alignment, box
+  width, spacing, exclusion offset, line weight, corner radius, number style and
+  thousands separator, and target figure width. The diagram re-flows so it stays
+  clean.
+- **Auto-balanced counts** — child and exclusion totals stay consistent; switch to
+  *manual* or *free edit* to override, with a red Δ marking any mismatch (never
+  exported).
+- **Branching** (two-arm symmetric split and multi-child bus bar), **exclusion
+  boxes** with reason rows and an auto-generated remainder, and **phase labels** on
+  the left rail.
+- **Hybrid layout** — auto-layout keeps everything tidy, but you can drag any box
+  to fine-tune its position and reset it at any time.
+- **Pan / zoom / fit**, undo / redo (100 steps), and local-storage autosave.
+- **Export** to SVG (true vector), PNG (300 / 600 / 1000 dpi, sized to your figure
+  width), JPG, print, and JSON project files (save / open).
+
+## Scripts
+
+- `npm run dev` – start the Vite dev server (served under `/consort/`)
 - `npm run build` – produce a static production build in `dist/`
 - `npm run preview` – preview the production build locally
 - `npm run test` – run unit tests with Vitest
 - `npm run lint` – run ESLint across the TypeScript source
 
-## Keyboard Cheat Sheet (V1)
+## Keyboard
 
-- Arrow keys – move selection between boxes (`↑/↓`) and box ↔ exclusion connectors (`←/→`)
-- `Enter` / `F2` – focus the inspector fields for the current selection
-- `Esc` – clear the current selection
-- `Cmd/Ctrl + ↓` – add a new main-flow box beneath the selected box
-- `Cmd/Ctrl + →` – jump from a box to its exclusion connector
-- `A` – toggle arrow ↔ plain line for the selected connector
+- `↑ ↓ ← →` – move selection between boxes and connectors
+- `Cmd/Ctrl + ↓` – add a step below the selection
 - `Cmd/Ctrl + Z` / `Shift + Cmd/Ctrl + Z` – undo / redo
+- `Delete` / `Backspace` – remove the selected box (and its subtree)
+- `Esc` – deselect
 
-## Feature Highlights (V1)
+## Architecture
 
-- Single-column main flow with orthogonal connectors
-- One exclusion box per interval with automatic tallies; optionally split exclusions into multiple reason rows with an auto-generated remainder
-- Unlock mode allows free editing while Δ badges highlight inconsistencies
-- Undo/redo history (100 steps), quick reset back to a starter canvas, and local-storage autosave
-- Export to SVG (always) and PNG (best-effort with fallback)
-- JSON import/export for moving projects between browsers or sharing with teammates
+```
+src/
+  model/        graph (calc engine), layout, style, templates, numbers, types
+  render/       geometry — the single source of geometric truth
+  canvas/       interactive SVG canvas (pan/zoom, drag, selection)
+  export/       svg + png/jpg renderers (share the render/ geometry)
+  ui/           Toolbar, LeftPanel, Inspector, StyleControls, HelpModal
+  state/        Zustand store (history, style, templates, persistence)
+  app/          App shell, keyboard, export wiring
+```
 
-## Known Limitations (Future Roadmap)
-
-- Branching flows, multi-reason exclusions, locale-aware formatting, and advanced export formats (PDF/EPS/JPG) are not yet implemented
-- PNG export renders at 2× scale by default; DPI presets arrive in a future milestone
-- Validation panel UI and global locale selector will appear in later releases
-
-Refer to `SPEC.md` and `ROADMAP.md` for the complete target scope and upcoming milestones.
+The on-screen canvas and the SVG/PNG exporters both build from
+`render/geometry.ts`, so **what you see is exactly what you publish**.
 
 ## Deployment (GitHub Pages)
 
-Pushing to the `main` branch triggers `.github/workflows/deploy.yml`, which runs tests, builds the Vite bundle, and deploys the contents of `dist/` to GitHub Pages. The site will be served from `https://hyeenus.github.io/consort/`, and `vite.config.ts` already sets `base: '/consort/'` so asset URLs resolve correctly.
-
-## Contextual Help (V1.1)
-
-The app now includes contextual pop-up guidance that appears the first time each feature is used. Highlights:
-
-- A welcome screen explains how to build CONSORT diagrams before any other tips appear.
-- Each toolbar toggle and export button shows a one-time description after its first use.
-- Inspector tips explain node editing, exclusions, and the auto-balancing logic.
-- Users can disable help permanently via each popup or the Help toggle in the toolbar, and re-enable it later if needed.
+`vite.config.ts` sets `base: '/consort/'`. Pushing to `main` builds the Vite bundle
+and deploys `dist/` to GitHub Pages at `https://hyeenus.github.io/consort/`.

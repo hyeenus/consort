@@ -2,7 +2,6 @@ import { nanoid } from 'nanoid';
 import {
   AppSettings,
   BoxNode,
-  CountFormat,
   ExclusionBox,
   ExclusionReason,
   GraphState,
@@ -12,6 +11,7 @@ import {
   PhaseBox,
 } from './types';
 import { layoutTree } from './layout';
+import { DiagramStyle, DEFAULT_STYLE } from './style';
 
 const DEFAULT_TEXT = ['New step'];
 
@@ -441,13 +441,60 @@ export function setSelected(graph: GraphState, id: string | undefined): GraphSta
   return cloned;
 }
 
+export function nudgeNodeOffset(graph: GraphState, nodeId: NodeId, delta: { x: number; y: number }): GraphState {
+  const cloned = cloneGraph(graph);
+  const node = cloned.nodes[nodeId];
+  if (!node) {
+    return cloned;
+  }
+  const current = node.manualOffset ?? { x: 0, y: 0 };
+  node.manualOffset = { x: current.x + delta.x, y: current.y + delta.y };
+  return cloned;
+}
+
+export function resetNodeOffset(graph: GraphState, nodeId: NodeId): GraphState {
+  const cloned = cloneGraph(graph);
+  const node = cloned.nodes[nodeId];
+  if (node) {
+    node.manualOffset = undefined;
+  }
+  return cloned;
+}
+
+export function clearManualLayout(graph: GraphState): GraphState {
+  const cloned = cloneGraph(graph);
+  Object.values(cloned.nodes).forEach((node) => {
+    node.manualOffset = undefined;
+    node.widthOverride = null;
+  });
+  return cloned;
+}
+
+export function setNodeWidthOverride(graph: GraphState, nodeId: NodeId, width: number | null): GraphState {
+  const cloned = cloneGraph(graph);
+  const node = cloned.nodes[nodeId];
+  if (node) {
+    node.widthOverride = width && width > 0 ? width : null;
+  }
+  return cloned;
+}
+
+/** Replace the whole graph (used when applying a study template). */
+export function loadGraph(graph: GraphState): GraphState {
+  const cloned = cloneGraph(graph);
+  if (cloned.startNodeId && cloned.nodes[cloned.startNodeId]) {
+    cloned.selectedId = cloned.startNodeId;
+  }
+  return cloned;
+}
+
 export function getParentId(graph: GraphState, nodeId: NodeId): NodeId | undefined {
   return Object.values(graph.intervals).find((interval) => interval.childId === nodeId)?.parentId;
 }
 
 function layoutGraphInPlace(
   graph: GraphState,
-  countFormat: CountFormat = 'upper',
+  style: DiagramStyle = DEFAULT_STYLE,
   options: { freeEdit?: boolean } = {}
 ): void {
   Object.values(graph.nodes).forEach((node) => {
@@ -457,8 +504,8 @@ function layoutGraphInPlace(
       node.childIds = node.childIds.filter((childId) => graph.nodes[childId]);
     }
   });
-  const { order } = layoutTree(graph.nodes, graph.startNodeId, countFormat, { freeEdit: options.freeEdit });
-  (graph as Record<string, unknown>).__order = order;
+  const { order } = layoutTree(graph.nodes, graph.startNodeId, style, { freeEdit: options.freeEdit });
+  (graph as unknown as Record<string, unknown>).__order = order;
 }
 
 function normalizePhases(graph: GraphState): void {
@@ -593,7 +640,7 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
             childNode: cloned.nodes[childId],
           };
         })
-        .filter((entry): entry is { interval: Interval; childNode?: BoxNode } => Boolean(entry));
+        .filter((entry): entry is { interval: Interval; childNode: BoxNode } => Boolean(entry));
 
       const totalChildren = branchEntries.reduce((acc, { childNode }) => acc + (childNode?.n ?? 0), 0);
       const diff = parentValue - totalChildren;
@@ -612,11 +659,11 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
       if (!interval) {
         return;
       }
-      if (settings.autoCalc && !settings.freeEdit && parentNode.n != null) {
-        if (interval.exclusion?.total == null && childNode?.n != null) {
+      if (settings.autoCalc && !settings.freeEdit && parentNode.n != null && interval.exclusion) {
+        if (interval.exclusion.total == null && childNode?.n != null) {
           const diff = parentNode.n - childNode.n;
           interval.exclusion.total = diff > 0 ? diff : null;
-        } else if (interval.exclusion?.total != null && childNode?.n == null) {
+        } else if (interval.exclusion.total != null && childNode && childNode.n == null) {
           childNode.n = parentNode.n - interval.exclusion.total;
         }
       }
@@ -627,14 +674,14 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
     }
   });
 
-  layoutGraphInPlace(cloned, settings.countFormat, { freeEdit: settings.freeEdit });
+  layoutGraphInPlace(cloned, settings.style, { freeEdit: settings.freeEdit });
   normalizePhases(cloned);
   return cloned;
 }
 
 export function orderNodes(graph: GraphState): BoxNode[] {
-  const cached = (graph as Record<string, unknown>).__order as NodeId[] | undefined;
-  const order = cached ?? layoutTree(graph.nodes, graph.startNodeId).order;
+  const cached = (graph as unknown as Record<string, unknown>).__order as NodeId[] | undefined;
+  const order = cached ?? layoutTree(graph.nodes, graph.startNodeId, DEFAULT_STYLE).order;
   return order
     .map((id) => graph.nodes[id])
     .filter((node): node is BoxNode => Boolean(node));
@@ -686,7 +733,7 @@ export function removeNode(graph: GraphState, nodeId: NodeId): GraphState {
     );
   }
 
-  cloned.selectedId = parentId ?? cloned.startNodeId;
+  cloned.selectedId = parentId ?? cloned.startNodeId ?? undefined;
   layoutGraphInPlace(cloned);
   return cloned;
 }

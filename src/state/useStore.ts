@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
-import { AppSettings, CountFormat, GraphState, IntervalId, NodeId, PersistedProject } from '../model/types';
+import { AppSettings, GraphState, IntervalId, NodeId, PersistedProject } from '../model/types';
 import {
   addNodeBelow,
   addPhase,
@@ -22,7 +22,14 @@ import {
   updatePhaseLabel,
   updatePhaseBounds,
   removePhase,
+  nudgeNodeOffset,
+  resetNodeOffset,
+  clearManualLayout,
+  setNodeWidthOverride,
+  loadGraph,
 } from '../model/graph';
+import { clampStyle, DEFAULT_STYLE, DiagramStyle, getStylePreset } from '../model/style';
+import { getTemplate } from '../model/templates';
 
 interface HistorySnapshot {
   graph: GraphState;
@@ -62,10 +69,17 @@ interface AppStore {
     updatePhaseBounds: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
     removePhase: (phaseId: string) => void;
     toggleAutoCalc: () => void;
-    toggleArrowsGlobal: () => void;
-    toggleCountFormat: () => void;
     toggleFreeEdit: () => void;
     toggleArrow: (intervalId: IntervalId) => void;
+    // Style + layout
+    updateStyle: (patch: Partial<DiagramStyle>) => void;
+    applyStylePreset: (id: string) => void;
+    applyTemplate: (id: string) => void;
+    nudgeNode: (nodeId: NodeId, delta: { x: number; y: number }) => void;
+    resetNodePosition: (nodeId: NodeId) => void;
+    clearLayout: () => void;
+    setNodeWidth: (nodeId: NodeId, width: number | null) => void;
+    commitHistorySnapshot: () => void;
     setHelpEnabled: (value: boolean) => void;
     selectById: (id: string | undefined) => void;
     navigateSelection: (direction: 'up' | 'down' | 'left' | 'right') => void;
@@ -79,10 +93,9 @@ interface AppStore {
 
 const defaultSettings: AppSettings = {
   autoCalc: true,
-  arrowsGlobal: true,
-  countFormat: 'upper',
   freeEdit: false,
   helpEnabled: true,
+  style: { ...DEFAULT_STYLE },
 };
 
 const defaultGraph = recomputeGraph(createInitialGraph(), defaultSettings);
@@ -99,346 +112,252 @@ function pushHistory(history: HistoryState, snapshot: HistorySnapshot): HistoryS
   if (past.length > HISTORY_LIMIT) {
     past.splice(0, past.length - HISTORY_LIMIT);
   }
-  return {
-    past,
-    future: [],
-  };
+  return { past, future: [] };
 }
 
 export const useAppStore = create<AppStore>()(
   subscribeWithSelector(
     persist(
-      (set, get) => ({
-        graph: defaultGraph,
-        settings: defaultSettings,
-        history: { past: [], future: [] },
-        actions: {
-          addNodeBelow: (parentId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const parent = state.graph.nodes[parentId];
-              let targetParentId = parentId;
-              if (parent?.childIds && parent.childIds.length > 0) {
-                targetParentId = parent.childIds[parent.childIds.length - 1];
-              }
-              const updatedGraph = recomputeGraph(addNodeBelow(state.graph, targetParentId), state.settings);
-              return {
-                ...state,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          addBranchChild: (parentId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: (() => {
-                let nextGraph = state.graph;
-                const parent = nextGraph.nodes[parentId];
+      (set, get) => {
+        /** Run a graph mutation with one undo step. */
+        const withHistory = (mutate: (state: AppStore) => GraphState, options: { recompute?: boolean } = {}) => {
+          const prev = cloneSnapshot(get().graph, get().settings);
+          set((state) => {
+            const nextGraph = mutate(state);
+            const finalGraph = options.recompute === false ? nextGraph : recomputeGraph(nextGraph, state.settings);
+            return { ...state, graph: finalGraph, history: pushHistory(state.history, prev) };
+          });
+        };
+
+        return {
+          graph: defaultGraph,
+          settings: defaultSettings,
+          history: { past: [], future: [] },
+          actions: {
+            addNodeBelow: (parentId) =>
+              withHistory((state) => {
+                const parent = state.graph.nodes[parentId];
+                let target = parentId;
+                if (parent?.childIds && parent.childIds.length > 0) {
+                  target = parent.childIds[parent.childIds.length - 1];
+                }
+                return addNodeBelow(state.graph, target);
+              }),
+            addBranchChild: (parentId) =>
+              withHistory((state) => {
+                let next = state.graph;
+                const parent = next.nodes[parentId];
                 const currentChildren = parent?.childIds?.length ?? 0;
                 if (currentChildren === 0) {
-                  nextGraph = addNodeBelow(nextGraph, parentId);
-                  nextGraph = addNodeBelow(nextGraph, parentId);
+                  next = addNodeBelow(next, parentId);
+                  next = addNodeBelow(next, parentId);
                 } else {
-                  nextGraph = addNodeBelow(nextGraph, parentId);
+                  next = addNodeBelow(next, parentId);
                 }
-                return recomputeGraph(nextGraph, state.settings);
-              })(),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          addPhase: () => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: addPhase(state.graph),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          updatePhaseLabel: (phaseId, label) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: updatePhaseLabel(state.graph, phaseId, label),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          updatePhaseBounds: (phaseId, startNodeId, endNodeId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          removePhase: (phaseId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: removePhase(state.graph, phaseId),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          updateNodeText: (nodeId, textLines) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const updatedGraph = recomputeGraph(updateNodeText(state.graph, nodeId, textLines), state.settings);
-              return {
-                ...state,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          updateNodeCount: (nodeId, value, override) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const updatedGraph = recomputeGraph(
+                return next;
+              }),
+            updateNodeText: (nodeId, textLines) =>
+              withHistory((state) => updateNodeText(state.graph, nodeId, textLines)),
+            updateNodeCount: (nodeId, value, override) =>
+              withHistory((state) =>
                 updateNodeCount(state.graph, nodeId, value, override, {
                   skipBranchRebalance: state.settings.freeEdit,
-                }),
-                state.settings
-              );
-              return {
-                ...state,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          updateExclusionLabel: (intervalId, label) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const updatedGraph = recomputeGraph(updateExclusionLabel(state.graph, intervalId, label), state.settings);
-              return {
-                ...state,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          updateExclusionCount: (intervalId, value, override) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const updatedGraph = recomputeGraph(
-                updateExclusionCount(state.graph, intervalId, value, override),
-                state.settings
-              );
-              return {
-                ...state,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          addExclusionReason: (intervalId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: recomputeGraph(addExclusionReason(state.graph, intervalId), state.settings),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          updateExclusionReasonLabel: (intervalId, reasonId, label) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: recomputeGraph(updateExclusionReasonLabel(state.graph, intervalId, reasonId, label), state.settings),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          updateExclusionReasonCount: (intervalId, reasonId, value, override) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: recomputeGraph(
-                updateExclusionReasonCount(state.graph, intervalId, reasonId, value, override),
-                state.settings
+                })
               ),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          removeExclusionReason: (intervalId, reasonId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: recomputeGraph(removeExclusionReason(state.graph, intervalId, reasonId), state.settings),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          removeNode: (nodeId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              ...state,
-              graph: recomputeGraph(removeNode(state.graph, nodeId), state.settings),
-              history: pushHistory(state.history, prev),
-            }));
-          },
-          toggleAutoCalc: () => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const nextSettings: AppSettings = { ...state.settings, autoCalc: !state.settings.autoCalc };
-              const updatedGraph = recomputeGraph(state.graph, nextSettings);
-              return {
-                ...state,
-                settings: nextSettings,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          toggleArrowsGlobal: () => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const nextSettings: AppSettings = { ...state.settings, arrowsGlobal: !state.settings.arrowsGlobal };
-              return {
-                ...state,
-                settings: nextSettings,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          toggleCountFormat: () => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const nextFormat: CountFormat = state.settings.countFormat === 'upper' ? 'parenthetical' : 'upper';
-              const nextSettings: AppSettings = { ...state.settings, countFormat: nextFormat };
-              const updatedGraph = recomputeGraph(state.graph, nextSettings);
-              return {
-                ...state,
-                settings: nextSettings,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          toggleFreeEdit: () => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const nextSettings: AppSettings = { ...state.settings, freeEdit: !state.settings.freeEdit };
-              const updatedGraph = recomputeGraph(state.graph, nextSettings);
-              return {
-                ...state,
-                settings: nextSettings,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          toggleArrow: (intervalId) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => {
-              const updatedGraph = recomputeGraph(toggleArrow(state.graph, intervalId), state.settings);
-              return {
-                ...state,
-                graph: updatedGraph,
-                history: pushHistory(state.history, prev),
-              };
-            });
-          },
-          setHelpEnabled: (value) => {
-            set((state) => ({
-              ...state,
-              settings: {
-                ...state.settings,
-                helpEnabled: value,
-              },
-            }));
-          },
-          selectById: (id) => {
-            set((state) => ({
-              ...state,
-              graph: setSelected(state.graph, id),
-            }));
-          },
-          navigateSelection: (direction) => {
-            const nextId = navigateSelection(get().graph, direction);
-            if (nextId) {
+            updateExclusionLabel: (intervalId, label) =>
+              withHistory((state) => updateExclusionLabel(state.graph, intervalId, label)),
+            updateExclusionCount: (intervalId, value, override) =>
+              withHistory((state) => updateExclusionCount(state.graph, intervalId, value, override)),
+            addExclusionReason: (intervalId) =>
+              withHistory((state) => addExclusionReason(state.graph, intervalId)),
+            updateExclusionReasonLabel: (intervalId, reasonId, label) =>
+              withHistory((state) => updateExclusionReasonLabel(state.graph, intervalId, reasonId, label)),
+            updateExclusionReasonCount: (intervalId, reasonId, value, override) =>
+              withHistory((state) =>
+                updateExclusionReasonCount(state.graph, intervalId, reasonId, value, override)
+              ),
+            removeExclusionReason: (intervalId, reasonId) =>
+              withHistory((state) => removeExclusionReason(state.graph, intervalId, reasonId)),
+            removeNode: (nodeId) => withHistory((state) => removeNode(state.graph, nodeId)),
+            addPhase: () => withHistory((state) => addPhase(state.graph), { recompute: false }),
+            updatePhaseLabel: (phaseId, label) =>
+              withHistory((state) => updatePhaseLabel(state.graph, phaseId, label), { recompute: false }),
+            updatePhaseBounds: (phaseId, startNodeId, endNodeId) =>
+              withHistory((state) => updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId), {
+                recompute: false,
+              }),
+            removePhase: (phaseId) =>
+              withHistory((state) => removePhase(state.graph, phaseId), { recompute: false }),
+            toggleAutoCalc: () => {
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => {
+                const nextSettings: AppSettings = { ...state.settings, autoCalc: !state.settings.autoCalc };
+                return {
+                  ...state,
+                  settings: nextSettings,
+                  graph: recomputeGraph(state.graph, nextSettings),
+                  history: pushHistory(state.history, prev),
+                };
+              });
+            },
+            toggleFreeEdit: () => {
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => {
+                const nextSettings: AppSettings = { ...state.settings, freeEdit: !state.settings.freeEdit };
+                return {
+                  ...state,
+                  settings: nextSettings,
+                  graph: recomputeGraph(state.graph, nextSettings),
+                  history: pushHistory(state.history, prev),
+                };
+              });
+            },
+            toggleArrow: (intervalId) => withHistory((state) => toggleArrow(state.graph, intervalId)),
+            updateStyle: (patch) => {
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => {
+                const nextStyle = clampStyle({ ...state.settings.style, ...patch, preset: 'custom' });
+                const nextSettings: AppSettings = { ...state.settings, style: nextStyle };
+                return {
+                  ...state,
+                  settings: nextSettings,
+                  graph: recomputeGraph(state.graph, nextSettings),
+                  history: pushHistory(state.history, prev),
+                };
+              });
+            },
+            applyStylePreset: (id) => {
+              const preset = getStylePreset(id);
+              if (!preset) {
+                return;
+              }
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => {
+                const nextSettings: AppSettings = {
+                  ...state.settings,
+                  style: clampStyle({ ...preset.style }),
+                };
+                return {
+                  ...state,
+                  settings: nextSettings,
+                  graph: recomputeGraph(state.graph, nextSettings),
+                  history: pushHistory(state.history, prev),
+                };
+              });
+            },
+            applyTemplate: (id) => {
+              const template = getTemplate(id);
+              if (!template) {
+                return;
+              }
+              const prev = cloneSnapshot(get().graph, get().settings);
               set((state) => ({
                 ...state,
-                graph: setSelected(state.graph, nextId),
+                graph: recomputeGraph(loadGraph(template.build()), state.settings),
+                history: pushHistory(state.history, prev),
               }));
-            }
-          },
-          undo: () => {
-            set((state) => {
-              const prev = state.history.past.at(-1);
-              if (!prev) {
-                return state;
-              }
-              const past = state.history.past.slice(0, -1);
-              const future = [cloneSnapshot(state.graph, state.settings), ...state.history.future];
-              return {
+            },
+            nudgeNode: (nodeId, delta) => {
+              set((state) => ({
                 ...state,
-                graph: prev.graph,
-                settings: prev.settings,
-                history: { past, future },
-              };
-            });
-          },
-          redo: () => {
-            set((state) => {
-              const next = state.history.future.at(0);
-              if (!next) {
-                return state;
+                graph: recomputeGraph(nudgeNodeOffset(state.graph, nodeId, delta), state.settings),
+              }));
+            },
+            resetNodePosition: (nodeId) =>
+              withHistory((state) => resetNodeOffset(state.graph, nodeId)),
+            clearLayout: () => withHistory((state) => clearManualLayout(state.graph)),
+            setNodeWidth: (nodeId, width) =>
+              withHistory((state) => setNodeWidthOverride(state.graph, nodeId, width)),
+            commitHistorySnapshot: () => {
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => ({ ...state, history: pushHistory(state.history, prev) }));
+            },
+            setHelpEnabled: (value) => {
+              set((state) => ({ ...state, settings: { ...state.settings, helpEnabled: value } }));
+            },
+            selectById: (id) => {
+              set((state) => ({ ...state, graph: setSelected(state.graph, id) }));
+            },
+            navigateSelection: (direction) => {
+              const nextId = navigateSelection(get().graph, direction);
+              if (nextId) {
+                set((state) => ({ ...state, graph: setSelected(state.graph, nextId) }));
               }
-              const future = state.history.future.slice(1);
-              const past = [...state.history.past, cloneSnapshot(state.graph, state.settings)];
-              return {
+            },
+            undo: () => {
+              set((state) => {
+                const prev = state.history.past.at(-1);
+                if (!prev) {
+                  return state;
+                }
+                const past = state.history.past.slice(0, -1);
+                const future = [cloneSnapshot(state.graph, state.settings), ...state.history.future];
+                return { ...state, graph: prev.graph, settings: prev.settings, history: { past, future } };
+              });
+            },
+            redo: () => {
+              set((state) => {
+                const next = state.history.future.at(0);
+                if (!next) {
+                  return state;
+                }
+                const future = state.history.future.slice(1);
+                const past = [...state.history.past, cloneSnapshot(state.graph, state.settings)];
+                return { ...state, graph: next.graph, settings: next.settings, history: { past, future } };
+              });
+            },
+            reset: () => {
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => ({
                 ...state,
-                graph: next.graph,
-                settings: next.settings,
-                history: { past, future },
+                graph: recomputeGraph(createInitialGraph(), state.settings),
+                history: pushHistory(state.history, prev),
+              }));
+            },
+            createExportSnapshot: () => {
+              const state = get();
+              return {
+                graph: snapshotGraph(state.graph),
+                settings: structuredClone(state.settings),
+                version: 2,
               };
-            });
+            },
+            importSnapshot: (snapshot) => {
+              const prev = cloneSnapshot(get().graph, get().settings);
+              set((state) => {
+                const importedSettings: AppSettings = {
+                  ...defaultSettings,
+                  ...snapshot.settings,
+                  style: clampStyle({ ...DEFAULT_STYLE, ...(snapshot.settings?.style ?? {}) }),
+                };
+                return {
+                  ...state,
+                  graph: recomputeGraph(snapshot.graph, importedSettings),
+                  settings: importedSettings,
+                  history: pushHistory(state.history, prev),
+                };
+              });
+            },
           },
-          reset: () => {
-            set(() => ({
-              graph: recomputeGraph(createInitialGraph(), defaultSettings),
-              settings: defaultSettings,
-              history: { past: [], future: [] },
-            }));
-          },
-          createExportSnapshot: () => {
-            const state = get();
-            return {
-              graph: snapshotGraph(state.graph),
-              settings: structuredClone(state.settings),
-              version: 1,
-            };
-          },
-          importSnapshot: (snapshot) => {
-            const prev = cloneSnapshot(get().graph, get().settings);
-            set((state) => ({
-              graph: recomputeGraph(snapshot.graph, snapshot.settings),
-              settings: snapshot.settings,
-              history: pushHistory(state.history, prev),
-            }));
-          },
-        },
-      }),
+        };
+      },
       {
-        name: 'consort-flow-v1',
-        partialize: (state: AppStore) => ({
-          graph: state.graph,
-          settings: state.settings,
-        }),
+        name: 'consort-flow-v2',
+        partialize: (state: AppStore) => ({ graph: state.graph, settings: state.settings }),
         merge: (persistedState, currentState) => {
           const persisted = persistedState as Partial<AppStore> | undefined;
-          const mergedSettings = {
-            ...currentState.settings,
-            ...(persisted?.settings ?? {}),
-          } satisfies AppSettings;
-          if (!mergedSettings.countFormat) {
-            mergedSettings.countFormat = 'upper';
-          }
-          if (typeof mergedSettings.freeEdit !== 'boolean') {
-            mergedSettings.freeEdit = false;
-          }
-          if (typeof mergedSettings.helpEnabled !== 'boolean') {
-            mergedSettings.helpEnabled = true;
-          }
+          const persistedSettings = (persisted?.settings ?? {}) as Partial<AppSettings>;
+          const mergedStyle: DiagramStyle = clampStyle({
+            ...DEFAULT_STYLE,
+            ...(persistedSettings.style ?? {}),
+          });
+          const mergedSettings: AppSettings = {
+            autoCalc: persistedSettings.autoCalc ?? currentState.settings.autoCalc,
+            freeEdit: typeof persistedSettings.freeEdit === 'boolean' ? persistedSettings.freeEdit : false,
+            helpEnabled:
+              typeof persistedSettings.helpEnabled === 'boolean' ? persistedSettings.helpEnabled : true,
+            style: mergedStyle,
+          };
           const mergedGraph = {
             ...currentState.graph,
             ...(persisted?.graph ?? {}),
@@ -446,10 +365,10 @@ export const useAppStore = create<AppStore>()(
           if (!Array.isArray(mergedGraph.phases)) {
             mergedGraph.phases = [];
           }
+          const recomputed = recomputeGraph(mergedGraph, mergedSettings);
           return {
             ...currentState,
-            ...persisted,
-            graph: mergedGraph,
+            graph: recomputed,
             settings: mergedSettings,
           } satisfies AppStore;
         },

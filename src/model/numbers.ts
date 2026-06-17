@@ -1,38 +1,53 @@
-import { CountFormat } from './types';
+import { DiagramStyle, NumberStyle, ThousandsSep } from './style';
 
-const DEFAULT_LOCALE = 'en-space';
-
-const separators: Record<string, string> = {
-  'en-space': ' ',
+const SEPARATORS: Record<ThousandsSep, string> = {
+  space: ' ', // regular space — CONSORT convention 12 345
+  comma: ',',
+  period: '.',
+  none: '',
 };
 
-export function formatInteger(n: number | null): string {
+export function formatInteger(n: number | null, sep: ThousandsSep = 'space'): string {
   if (n === null || Number.isNaN(n)) {
     return '—';
   }
-  const sep = separators[DEFAULT_LOCALE];
-  const parts = Math.trunc(n)
-    .toString()
-    .split('');
+  const separator = SEPARATORS[sep] ?? SEPARATORS.space;
+  const negative = n < 0;
+  const digits = Math.abs(Math.trunc(n)).toString().split('');
   const out: string[] = [];
   let counter = 0;
-  for (let i = parts.length - 1; i >= 0; i -= 1) {
-    out.unshift(parts[i]);
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    out.unshift(digits[i]);
     counter += 1;
-    if (counter === 3 && i !== 0) {
-      out.unshift(sep);
+    if (counter === 3 && i !== 0 && separator) {
+      out.unshift(separator);
       counter = 0;
     }
   }
-  return out.join('');
+  return `${negative ? '-' : ''}${out.join('')}`;
 }
 
-export function formatCount(n: number | null, format: CountFormat = 'upper'): string {
-  const value = formatInteger(n);
-  if (format === 'parenthetical') {
-    return `(n = ${value})`;
+function prefixFor(numberStyle: NumberStyle): string {
+  switch (numberStyle) {
+    case 'n':
+      return 'n = ';
+    case 'plain':
+      return '';
+    case 'N':
+    default:
+      return 'N = ';
   }
-  return `N = ${value}`;
+}
+
+/** Format a count line according to the active diagram style. */
+export function formatCount(n: number | null, style: DiagramStyle): string {
+  const value = formatInteger(n, style.thousandsSep);
+  return `${prefixFor(style.numberStyle)}${value}`;
+}
+
+/** Format only the numeric portion (used inside exclusion reason rows). */
+export function formatNumber(n: number | null, style: DiagramStyle): string {
+  return formatInteger(n, style.thousandsSep);
 }
 
 export function parseCount(text: string): number | null {
@@ -41,12 +56,9 @@ export function parseCount(text: string): number | null {
     return null;
   }
   const digitsOnly = trimmed.replace(/[^0-9-]/g, '');
-  if (!digitsOnly.length) {
+  if (!digitsOnly.length || digitsOnly === '-') {
     return null;
   }
   const value = Number(digitsOnly);
-  if (Number.isNaN(value)) {
-    return null;
-  }
-  return value;
+  return Number.isNaN(value) ? null : value;
 }

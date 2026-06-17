@@ -1,346 +1,192 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../state/useStore';
 import { Canvas } from '../canvas/Canvas';
 import { Inspector } from '../ui/Inspector';
-import { Toolbar } from '../ui/Toolbar';
-import { getSelectionKind } from '../model/graph';
-import type { AppSettings, GraphState, PersistedProject } from '../model/types';
+import { StyleControls } from '../ui/StyleControls';
+import { LeftPanel } from '../ui/LeftPanel';
+import { Toolbar, ExportKind } from '../ui/Toolbar';
+import { HelpModal } from '../ui/HelpModal';
 import { generateSvg } from '../export/svg';
+import { renderRasterBlob } from '../export/png';
 import { downloadBlob, downloadString } from '../export/download';
-import { renderPngBlob } from '../export/png';
-import { HelpProvider, useHelp } from '../help/HelpContext';
+import type { PersistedProject } from '../model/types';
 
-const welcomeHelpMessage = {
-  title: 'Welcome to the CONSORT builder',
-  body: (
-    <div>
-      <p>
-        This tool helps you outline CONSORT-style participant flow diagrams. Start by selecting boxes on the canvas,
-        editing their text, and letting the app keep patient totals balanced.
-      </p>
-      <p>Use the toolbar to add steps, format counts, or export polished SVG/PNG files for publication.</p>
-    </div>
-  ),
-};
+type RightTab = 'edit' | 'format';
 
 export const App: React.FC = () => {
   const graph = useAppStore((state) => state.graph);
   const settings = useAppStore((state) => state.settings);
-  const {
-    addNodeBelow,
-    addBranchChild,
-    addPhase,
-    selectById,
-    toggleAutoCalc,
-    toggleArrowsGlobal,
-    toggleCountFormat,
-    toggleFreeEdit,
-    undo,
-    redo,
-    removeNode,
-    updatePhaseBounds,
-    updatePhaseLabel,
-    removePhase,
-    createExportSnapshot,
-    importSnapshot,
-    reset,
-    setHelpEnabled,
-  } = useAppStore((state) => state.actions);
+  const actions = useAppStore((state) => state.actions);
 
-  return (
-    <HelpProvider
-      helpEnabled={settings.helpEnabled}
-      onDisableHelp={() => setHelpEnabled(false)}
-      welcomeMessage={welcomeHelpMessage}
-    >
-      <AppContent
-        graph={graph}
-        settings={settings}
-        actions={{
-          addNodeBelow,
-          addBranchChild,
-          addPhase,
-          selectById,
-          toggleAutoCalc,
-          toggleArrowsGlobal,
-          toggleCountFormat,
-          toggleFreeEdit,
-          undo,
-          redo,
-          removeNode,
-          updatePhaseBounds,
-          updatePhaseLabel,
-          removePhase,
-          createExportSnapshot,
-          importSnapshot,
-          reset,
-          setHelpEnabled,
-        }}
-      />
-    </HelpProvider>
+  const [rightTab, setRightTab] = useState<RightTab>('edit');
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  // When the selection changes to something concrete, show the Edit tab.
+  useEffect(() => {
+    if (graph.selectedId) {
+      setRightTab('edit');
+    }
+  }, [graph.selectedId]);
+
+  const handleExport = useCallback(async (kind: ExportKind) => {
+    const state = useAppStore.getState();
+    const { graph: g, settings: s } = state;
+    try {
+      switch (kind) {
+        case 'svg':
+          downloadString(generateSvg(g, s), 'flow-diagram.svg', 'image/svg+xml;charset=utf-8');
+          break;
+        case 'json':
+          downloadString(JSON.stringify(state.actions.createExportSnapshot(), null, 2), 'flow-diagram.json', 'application/json');
+          break;
+        case 'print':
+          printDiagram(generateSvg(g, s));
+          break;
+        case 'jpg': {
+          const { blob } = await renderRasterBlob(g, s, { dpi: 600, format: 'jpeg' });
+          downloadBlob(blob, 'flow-diagram.jpg');
+          break;
+        }
+        default: {
+          const dpi = kind === 'png600' ? 600 : kind === 'png1000' ? 1000 : 300;
+          const { blob } = await renderRasterBlob(g, s, { dpi, format: 'png' });
+          downloadBlob(blob, `flow-diagram-${dpi}dpi.png`);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      window.alert('That export failed. SVG export always works as a fallback.');
+    }
+  }, []);
+
+  const handleImport = useCallback(
+    (file: File) => {
+      void (async () => {
+        try {
+          const text = await file.text();
+          const parsed = JSON.parse(text) as unknown;
+          if (!isProject(parsed)) {
+            throw new Error('Invalid project file');
+          }
+          actions.importSnapshot(parsed);
+        } catch (error) {
+          console.error(error);
+          window.alert('Could not open that file. Make sure it is a project JSON exported from this app.');
+        }
+      })();
+    },
+    [actions]
   );
-};
 
-interface AppContentProps {
-  graph: GraphState;
-  settings: AppSettings;
-  actions: {
-    addNodeBelow: (parentId: string) => void;
-    addBranchChild: (parentId: string) => void;
-    addPhase: () => void;
-    selectById: (id: string | undefined) => void;
-    toggleAutoCalc: () => void;
-    toggleArrowsGlobal: () => void;
-    toggleCountFormat: () => void;
-    toggleFreeEdit: () => void;
-    undo: () => void;
-    redo: () => void;
-    removeNode: (nodeId: string) => void;
-    updatePhaseBounds: (phaseId: string, startNodeId: string, endNodeId: string) => void;
-    updatePhaseLabel: (phaseId: string, label: string) => void;
-    removePhase: (phaseId: string) => void;
-    createExportSnapshot: () => PersistedProject;
-    importSnapshot: (snapshot: PersistedProject) => void;
-    reset: () => void;
-    setHelpEnabled: (value: boolean) => void;
-  };
-}
+  // Keyboard shortcuts.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      const mod = event.metaKey || event.ctrlKey;
 
-const AppContent: React.FC<AppContentProps> = ({ graph, settings, actions }) => {
-  const {
-    addNodeBelow,
-    addBranchChild,
-    addPhase,
-    selectById,
-    toggleAutoCalc,
-    toggleArrowsGlobal,
-    toggleCountFormat,
-    toggleFreeEdit,
-    undo,
-    redo,
-    removeNode,
-    updatePhaseBounds,
-    updatePhaseLabel,
-    removePhase,
-    createExportSnapshot,
-    importSnapshot,
-    reset,
-    setHelpEnabled,
-  } = actions;
-  const { requestHelp } = useHelp();
+      if (mod && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          actions.redo();
+        } else {
+          actions.undo();
+        }
+        return;
+      }
+      if (inField) {
+        return;
+      }
+      if (mod && event.key === 'ArrowDown') {
+        event.preventDefault();
+        const { graph: g } = useAppStore.getState();
+        const target2 = g.selectedId && g.nodes[g.selectedId] ? g.selectedId : g.startNodeId;
+        if (target2) actions.addNodeBelow(target2);
+        return;
+      }
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        const direction = event.key.replace('Arrow', '').toLowerCase() as 'up' | 'down' | 'left' | 'right';
+        actions.navigateSelection(direction);
+        return;
+      }
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        const { graph: g } = useAppStore.getState();
+        if (g.selectedId && g.nodes[g.selectedId] && g.startNodeId !== g.selectedId) {
+          event.preventDefault();
+          actions.removeNode(g.selectedId);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        actions.selectById(undefined);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [actions]);
 
   return (
     <div className="app-shell">
-      <Toolbar
-        selectionKind={getSelectionKind(graph)}
-        settings={settings}
-        onAddStep={() => {
-          const selectionKind = getSelectionKind(graph);
-          const target = selectionKind === 'node' && graph.selectedId ? graph.selectedId : graph.startNodeId;
-          if (target) {
-            addNodeBelow(target);
-            requestHelp('add-step', {
-              title: 'Adding steps',
-              body: (
-                <p>
-                  New boxes inherit their parent counts. Add them where you want the next patient decision point, then
-                  adjust the text on the right.
-                </p>
-              ),
-            });
-          }
-        }}
-        onToggleAutoCalc={() => {
-          toggleAutoCalc();
-          requestHelp('auto-calc', {
-            title: 'Locked vs unlocked counts',
-            body: (
-              <p>
-                Locked numbers are recalculated automatically from parents. Unlocking lets you key in totals manually
-                when you need to override them.
-              </p>
-            ),
-          });
-        }}
-        onToggleArrows={() => {
-          toggleArrowsGlobal();
-          requestHelp('arrows', {
-            title: 'Lines and arrows',
-            body: (
-              <p>
-                Arrows emphasize forward flow while straight lines keep the chart minimal. Toggle to match the style of
-                your manuscript.
-              </p>
-            ),
-          });
-        }}
-        onToggleCountFormat={() => {
-          toggleCountFormat();
-          requestHelp('count-format', {
-            title: 'How counts are shown',
-            body: (
-              <p>
-                Use capital N for CONSORT defaults or switch to parenthetical (n) formatting when embedding counts into
-                text blocks.
-              </p>
-            ),
-          });
-        }}
-        onToggleFreeEdit={() => {
-          toggleFreeEdit();
-          requestHelp('free-edit', {
-            title: 'Free edit mode',
-            body: (
-              <p>
-                Free edit lets you type any labels or counts, even if totals do not add up. Turn it off to bring back
-                automatic balancing.
-              </p>
-            ),
-          });
-        }}
-        onUndo={undo}
-        onRedo={redo}
-        onAddPhase={() => {
-          addPhase();
-          requestHelp('phase-boxes', {
-            title: 'Phase labels',
-            body: (
-              <p>
-                Phase markers run down the left side of the diagram. Drag their handles to snap the top and bottom to
-                any main-flow box, or rename them in the inspector.
-              </p>
-            ),
-          });
-        }}
-        onExportSvg={() => {
-          const snapshotSvg = generateSvg(graph, settings);
-          downloadString(snapshotSvg, 'consort-flow.svg', 'image/svg+xml;charset=utf-8');
-          requestHelp('export-svg', {
-            title: 'SVG export',
-            body: (
-              <p>
-                SVG stays crystal clear at any size and can be edited further in vector tools such as Illustrator, but
-                some journal systems only accept raster images.
-              </p>
-            ),
-          });
-        }}
-        onExportPng={() => {
-          void (async () => {
-            try {
-              const blob = await renderPngBlob(graph, settings, { scale: 2 });
-              downloadBlob(blob, 'consort-flow.png');
-            } catch (error) {
-              alert('PNG export failed. The SVG export remains available.');
-              console.error(error);
-            }
-          })();
-          requestHelp('export-png', {
-            title: 'PNG export',
-            body: (
-              <p>
-                PNG works everywhere and is best for sharing previews, but avoid resizing it too much to prevent
-                blurriness.
-              </p>
-            ),
-          });
-        }}
-        onExportJson={() => {
-          const exportSnapshot = createExportSnapshot();
-          downloadString(JSON.stringify(exportSnapshot, null, 2), 'consort-flow.json', 'application/json');
-          requestHelp('export-json', {
-            title: 'JSON project export',
-            body: (
-              <p>
-                JSON saves the entire project so you can continue later or hand it to a teammate. It is not meant for
-                publishing directly.
-              </p>
-            ),
-          });
-        }}
-        onImportJson={(file) => {
-          void (async () => {
-            try {
-              const text = await file.text();
-              const parsed = JSON.parse(text) as unknown;
-              if (!isPersistedProject(parsed)) {
-                throw new Error('Invalid project file');
-              }
-              importSnapshot(parsed);
-              requestHelp('import-json', {
-                title: 'Importing projects',
-                body: (
-                  <p>
-                    Imports replace the current flow with everything from the file. Keep a backup export if you need to
-                    return to your previous state.
-                  </p>
-                ),
-              });
-            } catch (error) {
-              alert('Unable to import the selected file. Please verify it is a valid project JSON.');
-              console.error(error);
-            }
-          })();
-        }}
-        onReset={reset}
-        onToggleHelp={() => {
-          setHelpEnabled(!settings.helpEnabled);
-        }}
-      />
-      <div className="app-layout">
+      <Toolbar onExport={handleExport} onImport={handleImport} onShowHelp={() => setHelpOpen(true)} />
+      <div className="app-body">
+        <div className={leftOpen ? 'left-rail open' : 'left-rail'}>
+          {leftOpen && <LeftPanel />}
+          <button className="rail-toggle" onClick={() => setLeftOpen((open) => !open)} title={leftOpen ? 'Hide panel' : 'Show templates & presets'}>
+            {leftOpen ? '‹' : '›'}
+          </button>
+        </div>
+
         <Canvas
           graph={graph}
           settings={settings}
-          onSelect={selectById}
-          onCreateBelow={(nodeId) => {
-            addNodeBelow(nodeId);
-            requestHelp('add-step', {
-              title: 'Adding steps',
-              body: (
-                <p>
-                  New boxes inherit their parent counts. Add them where you want the next patient decision point, then
-                  adjust the text on the right.
-                </p>
-              ),
-            });
-          }}
-          onBranch={(nodeId) => {
-            addBranchChild(nodeId);
-            requestHelp('canvas-basics', {
-              title: 'Branching paths',
-              body: (
-                <p>
-                  Branching splits the current box into multiple outcomes. Balances are maintained automatically unless
-                  you switch to free edit.
-                </p>
-              ),
-            });
-          }}
-          onRemove={(nodeId) => {
-            removeNode(nodeId);
-          }}
-          onAdjustPhase={(phaseId, startNodeId, endNodeId) => {
-            updatePhaseBounds(phaseId, startNodeId, endNodeId);
-          }}
+          onSelect={actions.selectById}
+          onCreateBelow={actions.addNodeBelow}
+          onBranch={actions.addBranchChild}
+          onRemove={actions.removeNode}
+          onNudgeNode={actions.nudgeNode}
+          onBeginNodeDrag={actions.commitHistorySnapshot}
         />
-        <Inspector
-          graph={graph}
-          settings={settings}
-          onUpdatePhaseLabel={updatePhaseLabel}
-          onRemovePhase={removePhase}
-          onAdjustPhase={updatePhaseBounds}
-        />
+
+        <aside className="right-panel">
+          <div className="tab-bar">
+            <button className={rightTab === 'edit' ? 'tab active' : 'tab'} onClick={() => setRightTab('edit')}>
+              Edit
+            </button>
+            <button className={rightTab === 'format' ? 'tab active' : 'tab'} onClick={() => setRightTab('format')}>
+              Format
+            </button>
+          </div>
+          <div className="right-panel-content">{rightTab === 'edit' ? <Inspector /> : <StyleControls />}</div>
+        </aside>
       </div>
+
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
     </div>
   );
 };
 
-function isPersistedProject(value: unknown): value is PersistedProject {
+function isProject(value: unknown): value is PersistedProject {
   if (!value || typeof value !== 'object') {
     return false;
   }
-  const candidate = value as { version?: number; graph?: unknown; settings?: unknown };
-  const hasGraph = typeof candidate.graph === 'object' && candidate.graph !== null;
-  const hasSettings = typeof candidate.settings === 'object' && candidate.settings !== null;
-  return candidate.version === 1 && hasGraph && hasSettings;
+  const candidate = value as { graph?: unknown; settings?: unknown };
+  return typeof candidate.graph === 'object' && candidate.graph !== null && typeof candidate.settings === 'object';
+}
+
+function printDiagram(svg: string): void {
+  const win = window.open('', '_blank', 'noopener,nopener,width=900,height=700');
+  if (!win) {
+    window.alert('Pop-up blocked. Allow pop-ups to print, or export SVG/PNG instead.');
+    return;
+  }
+  win.document.write(
+    `<!DOCTYPE html><html><head><title>Flow diagram</title><style>@page{margin:12mm}body{margin:0;display:flex;justify-content:center;align-items:flex-start}svg{max-width:100%;height:auto}</style></head><body>${svg}</body></html>`
+  );
+  win.document.close();
+  win.focus();
+  setTimeout(() => {
+    win.print();
+  }, 250);
 }

@@ -1,3 +1,5 @@
+import { DiagramStyle } from './style';
+
 export type NodeId = string;
 export type IntervalId = string;
 
@@ -10,6 +12,12 @@ export interface BoxNode {
   autoLocked: boolean;
   childIds: NodeId[];
   countOverride?: string | null;
+  /** Manual drag offset (diagram coords) applied on top of auto-layout. */
+  manualOffset?: { x: number; y: number };
+  /** Optional per-box width override; falls back to style.boxWidth. */
+  widthOverride?: number | null;
+  /** Hide the auto count line for this box (e.g. group headers). */
+  hideCount?: boolean;
 }
 
 export type ExclusionReasonKind = 'user' | 'auto';
@@ -55,20 +63,17 @@ export interface GraphState {
   selectedId?: string;
 }
 
-export type CountFormat = 'upper' | 'parenthetical';
-
 export interface AppSettings {
   autoCalc: boolean;
-  arrowsGlobal: boolean;
-  countFormat: CountFormat;
   freeEdit: boolean;
   helpEnabled: boolean;
+  style: DiagramStyle;
 }
 
 export interface PersistedProject {
   graph: GraphState;
   settings: AppSettings;
-  version: 1;
+  version: 2;
 }
 
 export type SelectionKind = 'node' | 'interval' | 'phase' | undefined;
