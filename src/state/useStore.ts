@@ -67,6 +67,7 @@ interface AppStore {
     addPhase: () => void;
     updatePhaseLabel: (phaseId: string, label: string) => void;
     updatePhaseBounds: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
+    setPhaseBoundsLive: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
     removePhase: (phaseId: string) => void;
     toggleAutoCalc: () => void;
     toggleFreeEdit: () => void;
@@ -186,6 +187,12 @@ export const useAppStore = create<AppStore>()(
               withHistory((state) => updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId), {
                 recompute: false,
               }),
+            setPhaseBoundsLive: (phaseId, startNodeId, endNodeId) => {
+              set((state) => ({
+                ...state,
+                graph: updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId),
+              }));
+            },
             removePhase: (phaseId) =>
               withHistory((state) => removePhase(state.graph, phaseId), { recompute: false }),
             toggleAutoCalc: () => {

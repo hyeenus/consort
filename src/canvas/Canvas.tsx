@@ -12,11 +12,20 @@ interface CanvasProps {
   onRemove: (nodeId: string) => void;
   onNudgeNode: (nodeId: string, delta: { x: number; y: number }) => void;
   onBeginNodeDrag: () => void;
+  onSetPhaseBounds: (phaseId: string, startNodeId: string, endNodeId: string) => void;
 }
 
 const ACCENT = '#1d4ed8';
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 4;
+
+function capturePointer(element: Element, pointerId: number): void {
+  try {
+    element.setPointerCapture(pointerId);
+  } catch {
+    /* pointer capture is best-effort */
+  }
+}
 
 interface ViewState {
   zoom: number;
@@ -32,6 +41,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRemove,
   onNudgeNode,
   onBeginNodeDrag,
+  onSetPhaseBounds,
 }) => {
   const scene = useMemo(() => buildScene(graph, settings), [graph, settings]);
   const style = settings.style;
@@ -104,6 +114,36 @@ export const Canvas: React.FC<CanvasProps> = ({
     origin: { x: 0, y: 0 },
   });
   const dragState = useRef<{ id: string; lastX: number; lastY: number; pushed: boolean } | null>(null);
+  const phaseDrag = useRef<{ phaseId: string; edge: 'top' | 'bottom'; pushed: boolean } | null>(null);
+
+  // Main-flow box border levels (content coords) that phase handles snap to.
+  const mainEdges = useMemo(
+    () =>
+      scene.nodes
+        .filter((node) => node.node.column === 0)
+        .map((node) => ({ id: node.id, top: node.y, bottom: node.y + node.height })),
+    [scene.nodes]
+  );
+
+  const snapPhaseEdge = (contentY: number, edge: 'top' | 'bottom'): string | undefined => {
+    let bestId: string | undefined;
+    let bestDiff = Infinity;
+    mainEdges.forEach((mainEdge) => {
+      const target = edge === 'top' ? mainEdge.top : mainEdge.bottom;
+      const diff = Math.abs(contentY - target);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestId = mainEdge.id;
+      }
+    });
+    return bestId;
+  };
+
+  const pointerContentY = (clientY: number): number => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const top = rect ? rect.top : 0;
+    return (clientY - top - view.pan.y) / view.zoom;
+  };
 
   const handleWheel = (event: React.WheelEvent) => {
     if (!viewportRef.current) {
@@ -133,7 +173,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       startY: event.clientY,
       origin: { ...view.pan },
     };
-    (event.currentTarget as Element).setPointerCapture(event.pointerId);
+    capturePointer(event.currentTarget as Element, event.pointerId);
   };
 
   const handlePointerMove = (event: React.PointerEvent) => {
@@ -141,6 +181,25 @@ export const Canvas: React.FC<CanvasProps> = ({
       const dx = event.clientX - panState.current.startX;
       const dy = event.clientY - panState.current.startY;
       setView((prev) => ({ ...prev, pan: { x: panState.current.origin.x + dx, y: panState.current.origin.y + dy } }));
+      return;
+    }
+    const phase = phaseDrag.current;
+    if (phase) {
+      const target = graph.phases?.find((item) => item.id === phase.phaseId);
+      if (!target) {
+        return;
+      }
+      const snapped = snapPhaseEdge(pointerContentY(event.clientY), phase.edge);
+      if (!snapped) {
+        return;
+      }
+      if (!phase.pushed) {
+        onBeginNodeDrag();
+        phase.pushed = true;
+      }
+      const start = phase.edge === 'top' ? snapped : target.startNodeId;
+      const end = phase.edge === 'bottom' ? snapped : target.endNodeId;
+      onSetPhaseBounds(phase.phaseId, start, end);
       return;
     }
     const drag = dragState.current;
@@ -162,6 +221,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const endInteraction = (event: React.PointerEvent) => {
     panState.current.active = false;
     dragState.current = null;
+    phaseDrag.current = null;
     try {
       (event.currentTarget as Element).releasePointerCapture(event.pointerId);
     } catch {
@@ -173,7 +233,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     event.stopPropagation();
     onSelect(nodeId);
     dragState.current = { id: nodeId, lastX: event.clientX, lastY: event.clientY, pushed: false };
-    (event.currentTarget as Element).setPointerCapture(event.pointerId);
+    capturePointer(event.currentTarget as Element, event.pointerId);
+  };
+
+  const startPhaseDrag = (event: React.PointerEvent, phaseId: string, edge: 'top' | 'bottom') => {
+    event.stopPropagation();
+    onSelect(phaseId);
+    phaseDrag.current = { phaseId, edge, pushed: false };
+    capturePointer(event.currentTarget as Element, event.pointerId);
   };
 
   const zoomBy = (factor: number) => {
@@ -252,6 +319,28 @@ export const Canvas: React.FC<CanvasProps> = ({
                     </tspan>
                   ))}
                 </text>
+                {selected &&
+                  (['top', 'bottom'] as const).map((edge) => {
+                    const handleSize = Math.max(10, style.fontSize * 0.95);
+                    const cx = phase.x + phase.width / 2;
+                    const cy = edge === 'top' ? phase.y : phase.y + phase.height;
+                    return (
+                      <rect
+                        key={edge}
+                        className="phase-handle"
+                        x={cx - handleSize / 2}
+                        y={cy - handleSize / 2}
+                        width={handleSize}
+                        height={handleSize}
+                        rx={2}
+                        fill={ACCENT}
+                        stroke="#fff"
+                        strokeWidth={1}
+                        style={{ cursor: 'ns-resize' }}
+                        onPointerDown={(event) => startPhaseDrag(event, phase.id, edge)}
+                      />
+                    );
+                  })}
               </g>
             );
           })}

@@ -301,6 +301,10 @@ button {
   touch-action: none;
 }
 
+.phase-handle:hover {
+  fill: var(--accent-strong);
+}
+
 .node-control rect {
   transition: fill 0.1s;
 }
