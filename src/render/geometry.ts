@@ -11,7 +11,7 @@ import {
   nodeRenderWidth,
 } from '../model/layout';
 import { lineHeightFor } from '../model/style';
-import { CANVAS_MARGIN, phaseGap, phaseRailWidth } from '../model/constants';
+import { CANVAS_MARGIN, phaseGap, phaseNeatGap, phaseRailWidth } from '../model/constants';
 
 export interface TextLine {
   text: string;
@@ -350,7 +350,7 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
     const bottoms = mainNodes.map((node, index) => tops[index] + nodeRenderHeight(node, style, { freeEdit }));
     const indexOf = new Map(mainNodes.map((node, index) => [node.id, index] as const));
     const last = mainNodes.length - 1;
-    const neatGap = Math.max(6, Math.round(style.fontSize * 0.55));
+    const neatGap = phaseNeatGap(style);
 
     (graph.phases ?? []).forEach((phase) => {
       const si = indexOf.get(phase.startNodeId);
@@ -358,8 +358,12 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
       if (si == null || ei == null) {
         return;
       }
-      const topY = si > 0 ? (bottoms[si - 1] + tops[si]) / 2 + neatGap / 2 : tops[si];
-      const bottomY = ei < last ? (bottoms[ei] + tops[ei + 1]) / 2 - neatGap / 2 : bottoms[ei];
+      const topMode = phase.topMode ?? 'gap';
+      const bottomMode = phase.bottomMode ?? 'gap';
+      const topY =
+        topMode === 'border' || si === 0 ? tops[si] : (bottoms[si - 1] + tops[si]) / 2 + neatGap / 2;
+      const bottomY =
+        bottomMode === 'border' || ei === last ? bottoms[ei] : (bottoms[ei] + tops[ei + 1]) / 2 - neatGap / 2;
       const finalBottom = Math.max(bottomY, topY + 1);
       const textX = phaseRailX + railW / 2;
       const textY = (topY + finalBottom) / 2;

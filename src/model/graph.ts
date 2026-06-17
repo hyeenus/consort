@@ -349,6 +349,42 @@ export function updatePhaseBounds(
   return cloned;
 }
 
+export function setPhaseEdge(
+  graph: GraphState,
+  phaseId: string,
+  edge: 'top' | 'bottom',
+  nodeId: NodeId,
+  mode: 'gap' | 'border'
+): GraphState {
+  const cloned = cloneGraph(graph);
+  const phase = getPhase(cloned, phaseId);
+  const mainNodes = getMainFlowNodes(cloned);
+  if (!mainNodes.length || !cloned.nodes[nodeId]) {
+    return cloned;
+  }
+  const orderMap = new Map(mainNodes.map((node, index) => [node.id, index] as const));
+
+  if (edge === 'top') {
+    phase.startNodeId = nodeId;
+    phase.topMode = mode;
+  } else {
+    phase.endNodeId = nodeId;
+    phase.bottomMode = mode;
+  }
+
+  // Keep start at or above end; if the dragged edge crosses the other, collapse.
+  const startIndex = orderMap.get(phase.startNodeId) ?? 0;
+  const endIndex = orderMap.get(phase.endNodeId) ?? startIndex;
+  if (startIndex > endIndex) {
+    if (edge === 'top') {
+      phase.startNodeId = phase.endNodeId;
+    } else {
+      phase.endNodeId = phase.startNodeId;
+    }
+  }
+  return cloned;
+}
+
 export function removePhase(graph: GraphState, phaseId: string): GraphState {
   const cloned = cloneGraph(graph);
   cloned.phases = (cloned.phases ?? []).filter((phase) => phase.id !== phaseId);

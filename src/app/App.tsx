@@ -147,7 +147,7 @@ export const App: React.FC = () => {
           onRemove={actions.removeNode}
           onNudgeNode={actions.nudgeNode}
           onBeginNodeDrag={actions.commitHistorySnapshot}
-          onSetPhaseBounds={actions.setPhaseBoundsLive}
+          onSetPhaseEdge={actions.setPhaseEdgeLive}
         />
 
         <aside className="right-panel">

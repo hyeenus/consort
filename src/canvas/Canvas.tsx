@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AppSettings, GraphState } from '../model/types';
+import { AppSettings, GraphState, PhaseEdgeMode } from '../model/types';
 import { fontStack, paddingXFor } from '../model/style';
+import { phaseNeatGap } from '../model/constants';
 import { buildScene, firstLineCenterY, TextLine } from '../render/geometry';
 
 interface CanvasProps {
@@ -12,7 +13,7 @@ interface CanvasProps {
   onRemove: (nodeId: string) => void;
   onNudgeNode: (nodeId: string, delta: { x: number; y: number }) => void;
   onBeginNodeDrag: () => void;
-  onSetPhaseBounds: (phaseId: string, startNodeId: string, endNodeId: string) => void;
+  onSetPhaseEdge: (phaseId: string, edge: 'top' | 'bottom', nodeId: string, mode: PhaseEdgeMode) => void;
 }
 
 const ACCENT = '#1d4ed8';
@@ -41,7 +42,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRemove,
   onNudgeNode,
   onBeginNodeDrag,
-  onSetPhaseBounds,
+  onSetPhaseEdge,
 }) => {
   const scene = useMemo(() => buildScene(graph, settings), [graph, settings]);
   const style = settings.style;
@@ -116,27 +117,45 @@ export const Canvas: React.FC<CanvasProps> = ({
   const dragState = useRef<{ id: string; lastX: number; lastY: number; pushed: boolean } | null>(null);
   const phaseDrag = useRef<{ phaseId: string; edge: 'top' | 'bottom'; pushed: boolean } | null>(null);
 
-  // Main-flow box border levels (content coords) that phase handles snap to.
-  const mainEdges = useMemo(
-    () =>
-      scene.nodes
-        .filter((node) => node.node.column === 0)
-        .map((node) => ({ id: node.id, top: node.y, bottom: node.y + node.height })),
-    [scene.nodes]
-  );
-
-  const snapPhaseEdge = (contentY: number, edge: 'top' | 'bottom'): string | undefined => {
-    let bestId: string | undefined;
-    let bestDiff = Infinity;
-    mainEdges.forEach((mainEdge) => {
-      const target = edge === 'top' ? mainEdge.top : mainEdge.bottom;
-      const diff = Math.abs(contentY - target);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestId = mainEdge.id;
+  // Candidate snap levels (content coords) for each phase handle: every main-flow
+  // box border, plus the mid-gap point between consecutive boxes (with the neat
+  // gap applied) so phases can either sit on a border or meet around an arrow.
+  const phaseSnaps = useMemo(() => {
+    const col = scene.nodes
+      .filter((node) => node.node.column === 0)
+      .sort((a, b) => a.y - b.y)
+      .map((node) => ({ id: node.id, top: node.y, bottom: node.y + node.height }));
+    const neat = phaseNeatGap(style);
+    const top: { y: number; nodeId: string; mode: PhaseEdgeMode }[] = [];
+    const bottom: { y: number; nodeId: string; mode: PhaseEdgeMode }[] = [];
+    col.forEach((node, index) => {
+      top.push({ y: node.top, nodeId: node.id, mode: 'border' });
+      bottom.push({ y: node.bottom, nodeId: node.id, mode: 'border' });
+      if (index > 0) {
+        top.push({ y: (col[index - 1].bottom + node.top) / 2 + neat / 2, nodeId: node.id, mode: 'gap' });
+      }
+      if (index < col.length - 1) {
+        bottom.push({ y: (node.bottom + col[index + 1].top) / 2 - neat / 2, nodeId: node.id, mode: 'gap' });
       }
     });
-    return bestId;
+    return { top, bottom };
+  }, [scene.nodes, style]);
+
+  const snapPhaseEdge = (
+    contentY: number,
+    edge: 'top' | 'bottom'
+  ): { nodeId: string; mode: PhaseEdgeMode } | undefined => {
+    const candidates = edge === 'top' ? phaseSnaps.top : phaseSnaps.bottom;
+    let best: { nodeId: string; mode: PhaseEdgeMode } | undefined;
+    let bestDiff = Infinity;
+    candidates.forEach((candidate) => {
+      const diff = Math.abs(contentY - candidate.y);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = { nodeId: candidate.nodeId, mode: candidate.mode };
+      }
+    });
+    return best;
   };
 
   const pointerContentY = (clientY: number): number => {
@@ -185,10 +204,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
     const phase = phaseDrag.current;
     if (phase) {
-      const target = graph.phases?.find((item) => item.id === phase.phaseId);
-      if (!target) {
-        return;
-      }
       const snapped = snapPhaseEdge(pointerContentY(event.clientY), phase.edge);
       if (!snapped) {
         return;
@@ -197,9 +212,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onBeginNodeDrag();
         phase.pushed = true;
       }
-      const start = phase.edge === 'top' ? snapped : target.startNodeId;
-      const end = phase.edge === 'bottom' ? snapped : target.endNodeId;
-      onSetPhaseBounds(phase.phaseId, start, end);
+      onSetPhaseEdge(phase.phaseId, phase.edge, snapped.nodeId, snapped.mode);
       return;
     }
     const drag = dragState.current;

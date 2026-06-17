@@ -12,3 +12,8 @@ export function phaseRailWidth(style: DiagramStyle): number {
 export function phaseGap(style: DiagramStyle): number {
   return Math.round(style.fontSize * 1.6);
 }
+
+/** Small empty gap left between adjacent phases that meet at a connector mid-gap. */
+export function phaseNeatGap(style: DiagramStyle): number {
+  return Math.max(6, Math.round(style.fontSize * 0.55));
+}

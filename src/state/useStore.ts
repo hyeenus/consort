@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
-import { AppSettings, GraphState, IntervalId, NodeId, PersistedProject } from '../model/types';
+import { AppSettings, GraphState, IntervalId, NodeId, PersistedProject, PhaseEdgeMode } from '../model/types';
 import {
   addNodeBelow,
   addPhase,
@@ -21,6 +21,7 @@ import {
   removeNode,
   updatePhaseLabel,
   updatePhaseBounds,
+  setPhaseEdge,
   removePhase,
   nudgeNodeOffset,
   resetNodeOffset,
@@ -67,7 +68,7 @@ interface AppStore {
     addPhase: () => void;
     updatePhaseLabel: (phaseId: string, label: string) => void;
     updatePhaseBounds: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
-    setPhaseBoundsLive: (phaseId: string, startNodeId: NodeId, endNodeId: NodeId) => void;
+    setPhaseEdgeLive: (phaseId: string, edge: 'top' | 'bottom', nodeId: NodeId, mode: PhaseEdgeMode) => void;
     removePhase: (phaseId: string) => void;
     toggleAutoCalc: () => void;
     toggleFreeEdit: () => void;
@@ -187,10 +188,10 @@ export const useAppStore = create<AppStore>()(
               withHistory((state) => updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId), {
                 recompute: false,
               }),
-            setPhaseBoundsLive: (phaseId, startNodeId, endNodeId) => {
+            setPhaseEdgeLive: (phaseId, edge, nodeId, mode) => {
               set((state) => ({
                 ...state,
-                graph: updatePhaseBounds(state.graph, phaseId, startNodeId, endNodeId),
+                graph: setPhaseEdge(state.graph, phaseId, edge, nodeId, mode),
               }));
             },
             removePhase: (phaseId) =>

@@ -48,11 +48,21 @@ export interface Interval {
 
 export type PhaseId = string;
 
+/**
+ * Where a phase edge sits relative to the box it is anchored to:
+ * - 'gap': at the mid-point of the gap to the neighbouring box (with a small
+ *   neat gap so adjacent phases meet around the connector arrow).
+ * - 'border': exactly at the box's top/bottom border level.
+ */
+export type PhaseEdgeMode = 'gap' | 'border';
+
 export interface PhaseBox {
   id: PhaseId;
   label: string;
   startNodeId: NodeId;
   endNodeId: NodeId;
+  topMode?: PhaseEdgeMode;
+  bottomMode?: PhaseEdgeMode;
 }
 
 export interface GraphState {
