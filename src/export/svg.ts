@@ -1,6 +1,6 @@
 import { AppSettings, GraphState } from '../model/types';
 import { fontStack, paddingXFor } from '../model/style';
-import { buildScene, firstBaseline, TextLine } from '../render/geometry';
+import { buildScene, firstLineCenterY, TextLine } from '../render/geometry';
 
 interface SvgOptions {
   /** Include a transparent background instead of white (default white). */
@@ -45,7 +45,7 @@ export function generateSvg(graph: GraphState, settings: AppSettings, options: S
       rect(phase.x, phase.y, phase.width, phase.height, radius, fill, ink, sw),
       `<text x="${round(phase.textX)}" y="${round(phase.textY)}" transform="rotate(-90 ${round(phase.textX)} ${round(
         phase.textY
-      )})" text-anchor="middle" font-size="${style.fontSize}" font-weight="700" fill="${escapeAttr(ink)}">`
+      )})" text-anchor="middle" dominant-baseline="central" font-size="${style.fontSize}" font-weight="700" fill="${escapeAttr(ink)}">`
     );
     const startY = -((phase.lines.length - 1) * lineHeight) / 2;
     phase.lines.forEach((line, index) => {
@@ -119,9 +119,9 @@ export function generateSvg(graph: GraphState, settings: AppSettings, options: S
     const left = style.textAlign === 'left';
     const anchor = left ? 'start' : 'middle';
     const textX = left ? boxX + padX : centerX;
-    const startBaseline = firstBaseline(boxY, boxH, lines.length, lineHeight);
+    const startY = firstLineCenterY(boxY, boxH, lines.length, lineHeight);
     const segs: string[] = [
-      `<text x="${round(textX)}" y="${round(startBaseline)}" text-anchor="${anchor}" font-size="${
+      `<text x="${round(textX)}" y="${round(startY)}" text-anchor="${anchor}" dominant-baseline="central" font-size="${
         style.fontSize
       }" fill="${escapeAttr(ink)}">`,
     ];

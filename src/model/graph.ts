@@ -10,7 +10,7 @@ import {
   NodeId,
   PhaseBox,
 } from './types';
-import { layoutTree } from './layout';
+import { layoutTree, computeExclusionHeight, computeNodeHeight } from './layout';
 import { DiagramStyle, DEFAULT_STYLE } from './style';
 
 const DEFAULT_TEXT = ['New step'];
@@ -556,6 +556,77 @@ function reflowPhaseRanges(graph: GraphState, mainNodes: BoxNode[]): void {
   });
 }
 
+function exclusionIsVisible(exclusion: ExclusionBox | undefined): boolean {
+  if (!exclusion) {
+    return false;
+  }
+  if (exclusion.label && exclusion.label.trim() && exclusion.label.trim() !== 'Excluded') {
+    return true;
+  }
+  if (exclusion.totalOverride && exclusion.totalOverride.trim().length > 0) {
+    return true;
+  }
+  if (exclusion.total != null && exclusion.total !== 0) {
+    return true;
+  }
+  return exclusion.reasons.some((reason) => {
+    if (reason.kind === 'user') {
+      return true;
+    }
+    if (reason.countOverride && reason.countOverride.trim().length > 0) {
+      return true;
+    }
+    return reason.n != null && reason.n !== 0;
+  });
+}
+
+/**
+ * Exclusion boxes are centred on the connector between two stacked boxes. When
+ * two of them sit on the same side in adjacent intervals they can be taller than
+ * the gap between them and overlap. Compute one uniform vertical gap that is just
+ * large enough that no adjacent same-side exclusion boxes collide. Consecutive
+ * single-child intervals always share a side, so we only need to compare heights.
+ */
+function computeEffectiveVerticalGap(graph: GraphState, style: DiagramStyle, freeEdit: boolean): number {
+  const incoming = new Map<NodeId, Interval>();
+  const outgoing = new Map<NodeId, Interval>();
+  Object.values(graph.intervals).forEach((interval) => {
+    incoming.set(interval.childId, interval);
+    const parent = graph.nodes[interval.parentId];
+    if (parent && (parent.childIds?.length ?? 0) === 1) {
+      outgoing.set(interval.parentId, interval);
+    }
+  });
+
+  const margin = Math.round(style.fontSize * 1.4) + 8;
+  let requiredGap = style.verticalGap;
+
+  Object.values(graph.nodes).forEach((middle) => {
+    if ((middle.childIds?.length ?? 0) !== 1) {
+      return;
+    }
+    const above = incoming.get(middle.id);
+    const below = outgoing.get(middle.id);
+    if (!above || !below) {
+      return;
+    }
+    if (!exclusionIsVisible(above.exclusion) || !exclusionIsVisible(below.exclusion)) {
+      return;
+    }
+    const exAbove = computeExclusionHeight(above.exclusion, style, { freeEdit });
+    const exBelow = computeExclusionHeight(below.exclusion, style, { freeEdit });
+    const middleHeight = computeNodeHeight(middle, style, { freeEdit });
+    // Distance between the two connector midpoints is middleHeight + gap; it must
+    // span half of each exclusion box plus a margin.
+    const needed = Math.ceil((exAbove + exBelow) / 2 + margin - middleHeight);
+    if (needed > requiredGap) {
+      requiredGap = needed;
+    }
+  });
+
+  return requiredGap;
+}
+
 export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphState {
   const cloned = cloneGraph(graph);
   const intervalMap = new Map<string, Interval>();
@@ -674,7 +745,10 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
     }
   });
 
-  layoutGraphInPlace(cloned, settings.style, { freeEdit: settings.freeEdit });
+  const effectiveGap = computeEffectiveVerticalGap(cloned, settings.style, settings.freeEdit);
+  const layoutStyle =
+    effectiveGap === settings.style.verticalGap ? settings.style : { ...settings.style, verticalGap: effectiveGap };
+  layoutGraphInPlace(cloned, layoutStyle, { freeEdit: settings.freeEdit });
   normalizePhases(cloned);
   return cloned;
 }

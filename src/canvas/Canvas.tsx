@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, GraphState } from '../model/types';
 import { fontStack, paddingXFor } from '../model/style';
-import { buildScene, firstBaseline, TextLine } from '../render/geometry';
+import { buildScene, firstLineCenterY, TextLine } from '../render/geometry';
 
 interface CanvasProps {
   graph: GraphState;
@@ -243,6 +243,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   fontSize={style.fontSize}
                   fontWeight={700}
                   fill={ink}
+                  dominantBaseline="central"
                   transform={`rotate(-90 ${phase.textX} ${phase.textY})`}
                 >
                   {phase.lines.map((line, index) => (
@@ -374,9 +375,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     const left = style.textAlign === 'left';
     const anchor = left ? 'start' : 'middle';
     const textX = left ? boxX + padX : centerX;
-    const startBaseline = firstBaseline(boxY, boxH, lines.length, lineHeight);
+    const startY = firstLineCenterY(boxY, boxH, lines.length, lineHeight);
     return (
-      <text x={textX} y={startBaseline} textAnchor={anchor} fontSize={style.fontSize} fill={ink} pointerEvents="none">
+      <text
+        x={textX}
+        y={startY}
+        textAnchor={anchor}
+        dominantBaseline="central"
+        fontSize={style.fontSize}
+        fill={ink}
+        pointerEvents="none"
+      >
         {lines.map((line, index) => (
           <tspan
             key={index}

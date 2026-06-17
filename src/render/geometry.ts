@@ -126,10 +126,13 @@ function resolveExclusionSide(
   return 'right';
 }
 
-/** Vertical baseline of the first line for a vertically-centred text block. */
-function firstBaseline(top: number, height: number, lineCount: number, lineHeight: number): number {
+/**
+ * Vertical centre of the first line for a vertically-centred text block. Paired
+ * with `dominant-baseline: central` on the text so the block is exactly centred.
+ */
+function firstLineCenterY(top: number, height: number, lineCount: number, lineHeight: number): number {
   const block = lineHeight * Math.max(1, lineCount);
-  return top + (height - block) / 2 + lineHeight * 0.74;
+  return top + height / 2 - block / 2 + lineHeight / 2;
 }
 
 function branchSideOf(node: BoxNode): 'left' | 'right' | undefined {
@@ -336,5 +339,5 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
   };
 }
 
-/** First-line baseline helper exported for renderers. */
-export { firstBaseline };
+/** First-line centre helper exported for renderers. */
+export { firstLineCenterY };
