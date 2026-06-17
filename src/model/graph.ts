@@ -755,10 +755,34 @@ export function recomputeGraph(graph: GraphState, settings: AppSettings): GraphS
 
 export function orderNodes(graph: GraphState): BoxNode[] {
   const cached = (graph as unknown as Record<string, unknown>).__order as NodeId[] | undefined;
-  const order = cached ?? layoutTree(graph.nodes, graph.startNodeId, DEFAULT_STYLE).order;
+  const order = cached ?? traverseOrder(graph);
   return order
     .map((id) => graph.nodes[id])
     .filter((node): node is BoxNode => Boolean(node));
+}
+
+/**
+ * Pure DFS pre-order of the node ids. Used only as a fallback when the layout
+ * cache is missing (e.g. after a selection-only clone). It MUST NOT touch node
+ * positions — re-running the layout here with a default style would clobber the
+ * spacing computed during the last recompute and make boxes overlap.
+ */
+function traverseOrder(graph: GraphState): NodeId[] {
+  const order: NodeId[] = [];
+  const seen = new Set<NodeId>();
+  const visit = (id: NodeId) => {
+    if (seen.has(id) || !graph.nodes[id]) {
+      return;
+    }
+    seen.add(id);
+    order.push(id);
+    (graph.nodes[id].childIds ?? []).forEach(visit);
+  };
+  if (graph.startNodeId) {
+    visit(graph.startNodeId);
+  }
+  Object.keys(graph.nodes).forEach((id) => visit(id));
+  return order;
 }
 
 export function toggleArrow(graph: GraphState, intervalId: IntervalId): GraphState {

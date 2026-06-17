@@ -139,51 +139,139 @@ function branchSideOf(node: BoxNode): 'left' | 'right' | undefined {
   return (node as unknown as { __branchSide?: 'left' | 'right' }).__branchSide;
 }
 
+// Per-interval geometry computed once in layout coordinates, then converted to
+// absolute coordinates after the diagram extents (and so the centre) are known.
+interface IntervalGeom {
+  interval: Interval;
+  showArrow: boolean;
+  aligned: boolean;
+  pcxL: number;
+  ccxL: number;
+  parentBottomL: number;
+  childTopL: number;
+  midYL: number;
+  side: 'left' | 'right';
+  isBranch: boolean;
+  exclusion?: {
+    lines: TextLine[];
+    totalLineIndex: number | null;
+    isLeft: boolean;
+    boxLeftL: number;
+    height: number;
+    anchorXL: number;
+    anchorYL: number;
+  };
+}
+
 export function buildScene(graph: GraphState, settings: AppSettings): DiagramScene {
   const style = settings.style;
   const freeEdit = settings.freeEdit;
   const lineHeight = lineHeightFor(style);
   const ordered = orderNodes(graph);
 
-  // 1. Bounding box of the auto-positioned diagram (in raw layout coords).
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let maxBottom = 0;
+  // --- Pass 1: node extents + per-interval geometry (all in layout coords) ---
   let minNodeLeft = Infinity;
-  const reach = style.exclusionGap + style.exclusionWidth;
+  let maxNodeRight = -Infinity;
+  let maxBottom = 0;
   ordered.forEach((node) => {
     const width = nodeRenderWidth(node, style);
     const height = nodeRenderHeight(node, style, { freeEdit });
-    const half = width / 2;
-    minX = Math.min(minX, node.position.x - half - reach);
-    maxX = Math.max(maxX, node.position.x + half + reach);
+    minNodeLeft = Math.min(minNodeLeft, node.position.x - width / 2);
+    maxNodeRight = Math.max(maxNodeRight, node.position.x + width / 2);
     maxBottom = Math.max(maxBottom, node.position.y + height);
-    minNodeLeft = Math.min(minNodeLeft, node.position.x - half);
   });
-  if (!Number.isFinite(minX)) {
-    const fallback = style.boxWidth / 2 + reach;
-    minX = -fallback;
-    maxX = fallback;
+  if (!Number.isFinite(minNodeLeft)) {
     minNodeLeft = -style.boxWidth / 2;
+    maxNodeRight = style.boxWidth / 2;
     maxBottom = 0;
   }
 
+  let exMinLeft = Infinity;
+  let exMaxRight = -Infinity;
+  const geoms: IntervalGeom[] = [];
+
+  Object.values(graph.intervals).forEach((interval) => {
+    const parent = graph.nodes[interval.parentId];
+    const child = graph.nodes[interval.childId];
+    if (!parent || !child) {
+      return;
+    }
+    const parentHeight = nodeRenderHeight(parent, style, { freeEdit });
+    const pcxL = parent.position.x;
+    const ccxL = child.position.x;
+    const parentBottomL = parent.position.y + parentHeight;
+    const childTopL = child.position.y;
+    const midYL = (parentBottomL + childTopL) / 2;
+    const aligned = Math.abs(pcxL - ccxL) < 0.5;
+
+    const siblings = parent.childIds ?? [];
+    const totalChildren = siblings.length;
+    const childIndex = siblings.indexOf(child.id);
+    const isBranch = totalChildren > 1;
+    const side = resolveExclusionSide(pcxL, ccxL, totalChildren, childIndex, branchSideOf(child));
+
+    const geom: IntervalGeom = {
+      interval,
+      showArrow: style.arrowheads && interval.arrow,
+      aligned,
+      pcxL,
+      ccxL,
+      parentBottomL,
+      childTopL,
+      midYL,
+      side,
+      isBranch,
+    };
+
+    const allowExclusion = totalChildren <= 1 || hasVisibleExclusion(interval);
+    if (allowExclusion && interval.exclusion) {
+      const display = getExclusionDisplayContent(interval.exclusion, style, { freeEdit });
+      if (display.lines.length) {
+        const isLeft = side === 'left';
+        const height = computeExclusionHeight(interval.exclusion, style, { freeEdit });
+        const anchorXL = aligned ? pcxL : ccxL;
+        const anchorHalf = Math.max(nodeRenderWidth(parent, style), nodeRenderWidth(child, style)) / 2;
+        const boxLeftL = isLeft
+          ? anchorXL - anchorHalf - style.exclusionGap - style.exclusionWidth
+          : anchorXL + anchorHalf + style.exclusionGap;
+        exMinLeft = Math.min(exMinLeft, boxLeftL);
+        exMaxRight = Math.max(exMaxRight, boxLeftL + style.exclusionWidth);
+        geom.exclusion = {
+          lines: display.lines.map((text, index) => ({
+            text,
+            bold: display.totalLineIndex != null && index === display.totalLineIndex,
+          })),
+          totalLineIndex: display.totalLineIndex,
+          isLeft,
+          boxLeftL,
+          height,
+          anchorXL,
+          anchorYL: midYL,
+        };
+      }
+    }
+    geoms.push(geom);
+  });
+
+  // --- Extents, phase rail placement, and the absolute transform ---
   const railW = phaseRailWidth(style);
   const railGap = phaseGap(style);
   const hasPhases = (graph.phases ?? []).length > 0;
-  if (hasPhases && Number.isFinite(minNodeLeft)) {
-    minX = Math.min(minX, minNodeLeft - (railW + railGap));
-  }
 
-  const width = maxX - minX + CANVAS_MARGIN;
-  const centerX = -minX + CANVAS_MARGIN / 2;
+  const leftmost = Math.min(minNodeLeft, exMinLeft);
+  const rightmost = Math.max(maxNodeRight, exMaxRight);
+  const railReserve = hasPhases ? railGap + railW : 0;
+  const contentLeft = leftmost - railReserve;
+
+  const width = rightmost - contentLeft + CANVAS_MARGIN;
+  const centerX = -contentLeft + CANVAS_MARGIN / 2;
   const verticalOffset = CANVAS_MARGIN / 2;
   const height = maxBottom + CANVAS_MARGIN;
-
   const toX = (x: number) => centerX + x;
   const toY = (y: number) => verticalOffset + y;
+  const phaseRailX = toX(leftmost) - railGap - railW;
 
-  // 2. Nodes.
+  // --- Pass 2: build absolute visuals ---
   const nodes: NodeVisual[] = ordered.map((node) => {
     const w = nodeRenderWidth(node, style);
     const h = nodeRenderHeight(node, style, { freeEdit });
@@ -203,114 +291,78 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
     };
   });
 
-  // 3. Connectors + exclusions + deltas.
   const connectors: ConnectorVisual[] = [];
   const exclusions: ExclusionVisual[] = [];
   const deltas: DeltaVisual[] = [];
 
-  Object.values(graph.intervals).forEach((interval) => {
-    const parent = graph.nodes[interval.parentId];
-    const child = graph.nodes[interval.childId];
-    if (!parent || !child) {
-      return;
-    }
-    const pcx = toX(parent.position.x);
-    const ccx = toX(child.position.x);
-    const parentBottom = toY(parent.position.y) + nodeRenderHeight(parent, style, { freeEdit });
-    const childTop = toY(child.position.y);
-    const showArrow = style.arrowheads && interval.arrow;
+  geoms.forEach((geom) => {
+    const pcx = toX(geom.pcxL);
+    const ccx = toX(geom.ccxL);
+    const parentBottom = toY(geom.parentBottomL);
+    const childTop = toY(geom.childTopL);
+    const midY = toY(geom.midYL);
+    const path = geom.aligned
+      ? `M ${pcx} ${parentBottom} L ${pcx} ${childTop}`
+      : `M ${pcx} ${parentBottom} L ${pcx} ${midY} L ${ccx} ${midY} L ${ccx} ${childTop}`;
+    connectors.push({ intervalId: geom.interval.id, path, showArrow: geom.showArrow });
 
-    const siblings = parent.childIds ?? [];
-    const totalChildren = siblings.length;
-    const childIndex = siblings.indexOf(child.id);
-    const isBranch = totalChildren > 1;
-    const aligned = Math.abs(pcx - ccx) < 0.5;
-    const midY = (parentBottom + childTop) / 2;
-
-    // Always-orthogonal routing.
-    let path: string;
-    let anchorX: number;
-    if (aligned) {
-      path = `M ${pcx} ${parentBottom} L ${pcx} ${childTop}`;
-      anchorX = pcx;
-    } else {
-      path = `M ${pcx} ${parentBottom} L ${pcx} ${midY} L ${ccx} ${midY} L ${ccx} ${childTop}`;
-      anchorX = ccx;
-    }
-    const anchorY = midY;
-    connectors.push({ intervalId: interval.id, path, showArrow });
-
-    const allowExclusion = totalChildren <= 1 || hasVisibleExclusion(interval);
-    const side = resolveExclusionSide(
-      parent.position.x,
-      child.position.x,
-      totalChildren,
-      childIndex,
-      branchSideOf(child)
-    );
-
-    if (allowExclusion && interval.exclusion) {
-      const display = getExclusionDisplayContent(interval.exclusion, style, { freeEdit });
-      if (display.lines.length) {
-        const isLeft = side === 'left';
-        const exHeight = computeExclusionHeight(interval.exclusion, style, { freeEdit });
-        // Clear the main column by exclusionGap measured from the box edge, so
-        // the exclusion box never overlaps the flow regardless of box width.
-        const anchorHalf = Math.max(nodeRenderWidth(parent, style), nodeRenderWidth(child, style)) / 2;
-        const boxX = isLeft
-          ? anchorX - anchorHalf - style.exclusionGap - style.exclusionWidth
-          : anchorX + anchorHalf + style.exclusionGap;
-        const boxY = anchorY - exHeight / 2;
-        const connectorTargetX = isLeft ? boxX + style.exclusionWidth : boxX;
-        exclusions.push({
-          intervalId: interval.id,
-          x: boxX,
-          y: boxY,
-          width: style.exclusionWidth,
-          height: exHeight,
-          centerX: boxX + style.exclusionWidth / 2,
-          connector: { x1: anchorX, y1: anchorY, x2: connectorTargetX, y2: anchorY },
-          showArrow,
-          lines: display.lines.map((text, index) => ({
-            text,
-            bold: display.totalLineIndex != null && index === display.totalLineIndex,
-          })),
-        });
-      }
+    if (geom.exclusion) {
+      const ex = geom.exclusion;
+      const boxX = toX(ex.boxLeftL);
+      const anchorX = toX(ex.anchorXL);
+      const anchorY = toY(ex.anchorYL);
+      const boxY = anchorY - ex.height / 2;
+      const connectorTargetX = ex.isLeft ? boxX + style.exclusionWidth : boxX;
+      exclusions.push({
+        intervalId: geom.interval.id,
+        x: boxX,
+        y: boxY,
+        width: style.exclusionWidth,
+        height: ex.height,
+        centerX: boxX + style.exclusionWidth / 2,
+        connector: { x1: anchorX, y1: anchorY, x2: connectorTargetX, y2: anchorY },
+        showArrow: geom.showArrow,
+        lines: ex.lines,
+      });
     }
 
-    if (interval.delta && !freeEdit) {
-      const deltaSide = side === 'left' ? 1 : -1; // place opposite the exclusion
-      const offset = Math.max(nodeRenderWidth(parent, style), nodeRenderWidth(child, style)) / 2 + style.fontSize * 3;
-      const deltaX = isBranch ? (pcx + ccx) / 2 : pcx + deltaSide * offset;
-      const label = interval.delta > 0 ? `Δ +${interval.delta}` : `Δ ${interval.delta}`;
-      deltas.push({ intervalId: interval.id, x: deltaX, y: anchorY, label });
+    if (geom.interval.delta && !freeEdit) {
+      const parent = graph.nodes[geom.interval.parentId];
+      const child = graph.nodes[geom.interval.childId];
+      const offset =
+        Math.max(parent ? nodeRenderWidth(parent, style) : style.boxWidth, child ? nodeRenderWidth(child, style) : style.boxWidth) /
+          2 +
+        style.fontSize * 3;
+      const deltaSide = geom.side === 'left' ? 1 : -1;
+      const deltaX = geom.isBranch ? (pcx + ccx) / 2 : pcx + deltaSide * offset;
+      const label = geom.interval.delta > 0 ? `Δ +${geom.interval.delta}` : `Δ ${geom.interval.delta}`;
+      deltas.push({ intervalId: geom.interval.id, x: deltaX, y: midY, label });
     }
   });
 
-  // 4. Phases on the left rail.
-  const phaseAnchors = new Map<string, { top: number; bottom: number }>();
-  ordered
-    .filter((node) => node.column === 0)
-    .forEach((node) => {
-      const top = toY(node.position.y);
-      phaseAnchors.set(node.id, { top, bottom: top + nodeRenderHeight(node, style, { freeEdit }) });
-    });
-
-  const phaseRailX = centerX + minNodeLeft - railGap - railW;
+  // --- Phases: taller bands that meet at the mid-gap between boxes ---
   const phases: PhaseVisual[] = [];
   if (hasPhases) {
+    const mainNodes = ordered
+      .filter((node) => node.column === 0)
+      .sort((a, b) => a.position.y - b.position.y);
+    const tops = mainNodes.map((node) => toY(node.position.y));
+    const bottoms = mainNodes.map((node, index) => tops[index] + nodeRenderHeight(node, style, { freeEdit }));
+    const indexOf = new Map(mainNodes.map((node, index) => [node.id, index] as const));
+    const last = mainNodes.length - 1;
+    const neatGap = Math.max(6, Math.round(style.fontSize * 0.55));
+
     (graph.phases ?? []).forEach((phase) => {
-      const start = phaseAnchors.get(phase.startNodeId);
-      const end = phaseAnchors.get(phase.endNodeId);
-      if (!start || !end) {
+      const si = indexOf.get(phase.startNodeId);
+      const ei = indexOf.get(phase.endNodeId);
+      if (si == null || ei == null) {
         return;
       }
-      const topY = start.top;
-      const bottomY = Math.max(end.bottom, topY + 1);
-      const ph = bottomY - topY;
+      const topY = si > 0 ? (bottoms[si - 1] + tops[si]) / 2 + neatGap / 2 : tops[si];
+      const bottomY = ei < last ? (bottoms[ei] + tops[ei + 1]) / 2 - neatGap / 2 : bottoms[ei];
+      const finalBottom = Math.max(bottomY, topY + 1);
       const textX = phaseRailX + railW / 2;
-      const textY = topY + ph / 2;
+      const textY = (topY + finalBottom) / 2;
       const label = phase.label?.trim().length ? phase.label : 'Phase';
       phases.push({
         id: phase.id,
@@ -318,7 +370,7 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
         x: phaseRailX,
         y: topY,
         width: railW,
-        height: ph,
+        height: finalBottom - topY,
         textX,
         textY,
         lines: label.split(/\n+/),

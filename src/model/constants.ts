@@ -5,7 +5,7 @@ export const CANVAS_MARGIN = 96;
 
 /** Width of a rotated phase label rail, proportional to the font size. */
 export function phaseRailWidth(style: DiagramStyle): number {
-  return Math.round(style.fontSize * 2.8);
+  return Math.max(34, Math.round(style.fontSize * 2.4));
 }
 
 /** Gap between the phase rail and the left edge of the diagram. */
