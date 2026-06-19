@@ -148,6 +148,7 @@ export const App: React.FC = () => {
           onNudgeNode={actions.nudgeNode}
           onBeginNodeDrag={actions.commitHistorySnapshot}
           onSetPhaseEdge={actions.setPhaseEdgeLive}
+          onSetStyleLive={actions.setStyleLive}
         />
 
         <aside className="right-panel">

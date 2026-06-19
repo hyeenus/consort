@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppSettings, GraphState, PhaseEdgeMode } from '../model/types';
-import { fontStack, paddingXFor } from '../model/style';
+import { DiagramStyle, fontStack, paddingXFor } from '../model/style';
 import { phaseNeatGap } from '../model/constants';
-import { buildScene, firstLineCenterY, TextLine } from '../render/geometry';
+import { buildScene, firstBaselineY, BASELINE_RATIO, TextLine } from '../render/geometry';
 
 interface CanvasProps {
   graph: GraphState;
@@ -14,6 +14,7 @@ interface CanvasProps {
   onNudgeNode: (nodeId: string, delta: { x: number; y: number }) => void;
   onBeginNodeDrag: () => void;
   onSetPhaseEdge: (phaseId: string, edge: 'top' | 'bottom', nodeId: string, mode: PhaseEdgeMode) => void;
+  onSetStyleLive: (patch: Partial<DiagramStyle>) => void;
 }
 
 const ACCENT = '#1d4ed8';
@@ -43,6 +44,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onNudgeNode,
   onBeginNodeDrag,
   onSetPhaseEdge,
+  onSetStyleLive,
 }) => {
   const scene = useMemo(() => buildScene(graph, settings), [graph, settings]);
   const style = settings.style;
@@ -116,6 +118,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   });
   const dragState = useRef<{ id: string; lastX: number; lastY: number; pushed: boolean } | null>(null);
   const phaseDrag = useRef<{ phaseId: string; edge: 'top' | 'bottom'; pushed: boolean } | null>(null);
+  const widthDrag = useRef<{ kind: 'box' | 'exclusion' | 'phase'; anchorX: number; pushed: boolean } | null>(null);
 
   // Candidate snap levels (content coords) for each phase handle: every main-flow
   // box border, plus the mid-gap point between consecutive boxes (with the neat
@@ -129,8 +132,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     const top: { y: number; nodeId: string; mode: PhaseEdgeMode }[] = [];
     const bottom: { y: number; nodeId: string; mode: PhaseEdgeMode }[] = [];
     col.forEach((node, index) => {
-      top.push({ y: node.top, nodeId: node.id, mode: 'border' });
-      bottom.push({ y: node.bottom, nodeId: node.id, mode: 'border' });
+      // Either handle can snap to any box top or bottom border.
+      top.push({ y: node.top, nodeId: node.id, mode: 'box-top' });
+      top.push({ y: node.bottom, nodeId: node.id, mode: 'box-bottom' });
+      bottom.push({ y: node.bottom, nodeId: node.id, mode: 'box-bottom' });
+      bottom.push({ y: node.top, nodeId: node.id, mode: 'box-top' });
       if (index > 0) {
         top.push({ y: (col[index - 1].bottom + node.top) / 2 + neat / 2, nodeId: node.id, mode: 'gap' });
       }
@@ -162,6 +168,25 @@ export const Canvas: React.FC<CanvasProps> = ({
     const rect = viewportRef.current?.getBoundingClientRect();
     const top = rect ? rect.top : 0;
     return (clientY - top - view.pan.y) / view.zoom;
+  };
+
+  const pointerContentX = (clientX: number): number => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    const left = rect ? rect.left : 0;
+    return (clientX - left - view.pan.x) / view.zoom;
+  };
+
+  // Drag the edge of a box to resize the matching global width.
+  const startWidthDrag = (
+    event: React.PointerEvent,
+    kind: 'box' | 'exclusion' | 'phase',
+    anchorX: number,
+    selectId: string
+  ) => {
+    event.stopPropagation();
+    onSelect(selectId);
+    widthDrag.current = { kind, anchorX, pushed: false };
+    capturePointer(event.currentTarget as Element, event.pointerId);
   };
 
   const handleWheel = (event: React.WheelEvent) => {
@@ -202,6 +227,22 @@ export const Canvas: React.FC<CanvasProps> = ({
       setView((prev) => ({ ...prev, pan: { x: panState.current.origin.x + dx, y: panState.current.origin.y + dy } }));
       return;
     }
+    const width = widthDrag.current;
+    if (width) {
+      if (!width.pushed) {
+        onBeginNodeDrag();
+        width.pushed = true;
+      }
+      const dist = Math.abs(pointerContentX(event.clientX) - width.anchorX);
+      if (width.kind === 'box') {
+        onSetStyleLive({ boxWidth: dist * 2 });
+      } else if (width.kind === 'exclusion') {
+        onSetStyleLive({ exclusionWidth: dist });
+      } else {
+        onSetStyleLive({ phaseWidth: dist });
+      }
+      return;
+    }
     const phase = phaseDrag.current;
     if (phase) {
       const snapped = snapPhaseEdge(pointerContentY(event.clientY), phase.edge);
@@ -235,6 +276,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     panState.current.active = false;
     dragState.current = null;
     phaseDrag.current = null;
+    widthDrag.current = null;
     try {
       (event.currentTarget as Element).releasePointerCapture(event.pointerId);
     } catch {
@@ -294,7 +336,8 @@ export const Canvas: React.FC<CanvasProps> = ({
           {/* Phases */}
           {scene.phases.map((phase) => {
             const selected = selectedId === phase.id;
-            const startY = -((phase.lines.length - 1) * lineHeight) / 2;
+            const phaseBaseY =
+              phase.textY + style.fontSize * BASELINE_RATIO - ((phase.lines.length - 1) * lineHeight) / 2;
             return (
               <g
                 key={phase.id}
@@ -318,16 +361,15 @@ export const Canvas: React.FC<CanvasProps> = ({
                 />
                 <text
                   x={phase.textX}
-                  y={phase.textY}
+                  y={phaseBaseY}
                   textAnchor="middle"
                   fontSize={style.fontSize}
                   fontWeight={700}
                   fill={ink}
-                  dominantBaseline="central"
                   transform={`rotate(-90 ${phase.textX} ${phase.textY})`}
                 >
                   {phase.lines.map((line, index) => (
-                    <tspan key={index} x={phase.textX} dy={index === 0 ? startY : lineHeight}>
+                    <tspan key={index} x={phase.textX} dy={index === 0 ? 0 : lineHeight}>
                       {line}
                     </tspan>
                   ))}
@@ -354,6 +396,21 @@ export const Canvas: React.FC<CanvasProps> = ({
                       />
                     );
                   })}
+                {selected && (
+                  <rect
+                    className="width-handle"
+                    x={phase.x - 3}
+                    y={phase.y + phase.height / 2 - Math.max(12, style.fontSize)}
+                    width={6}
+                    height={Math.max(24, style.fontSize * 2)}
+                    rx={3}
+                    fill={ACCENT}
+                    stroke="#fff"
+                    strokeWidth={1}
+                    style={{ cursor: 'ew-resize' }}
+                    onPointerDown={(event) => startWidthDrag(event, 'phase', phase.x + phase.width, phase.id)}
+                  />
+                )}
               </g>
             );
           })}
@@ -408,6 +465,28 @@ export const Canvas: React.FC<CanvasProps> = ({
                   strokeWidth={selected ? style.lineWeight + 1.4 : style.lineWeight}
                 />
                 {renderText(exclusion.lines, exclusion.x, exclusion.y, exclusion.width, exclusion.height, exclusion.centerX)}
+                {selected &&
+                  (() => {
+                    // Outer edge is the side away from the column connector.
+                    const isRightSide = exclusion.connector.x1 <= exclusion.x + 0.5;
+                    const innerX = isRightSide ? exclusion.x : exclusion.x + exclusion.width;
+                    const handleX = isRightSide ? exclusion.x + exclusion.width : exclusion.x;
+                    return (
+                      <rect
+                        className="width-handle"
+                        x={handleX - 3}
+                        y={exclusion.y + exclusion.height / 2 - Math.max(12, style.fontSize)}
+                        width={6}
+                        height={Math.max(24, style.fontSize * 2)}
+                        rx={3}
+                        fill={ACCENT}
+                        stroke="#fff"
+                        strokeWidth={1}
+                        style={{ cursor: 'ew-resize' }}
+                        onPointerDown={(event) => startWidthDrag(event, 'exclusion', innerX, exclusion.intervalId)}
+                      />
+                    );
+                  })()}
               </g>
             );
           })}
@@ -431,6 +510,21 @@ export const Canvas: React.FC<CanvasProps> = ({
                   onPointerDown={(event) => startNodeDrag(event, node.id)}
                 />
                 {renderText(node.lines, node.x, node.y, node.width, node.height, node.centerX)}
+                {selected && (
+                  <rect
+                    className="width-handle"
+                    x={node.x + node.width - 3}
+                    y={node.y + node.height / 2 - Math.max(12, style.fontSize)}
+                    width={6}
+                    height={Math.max(24, style.fontSize * 2)}
+                    rx={3}
+                    fill={ACCENT}
+                    stroke="#fff"
+                    strokeWidth={1}
+                    style={{ cursor: 'ew-resize' }}
+                    onPointerDown={(event) => startWidthDrag(event, 'box', node.centerX, node.id)}
+                  />
+                )}
                 {selected && renderNodeControls(node)}
               </g>
             );
@@ -477,17 +571,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     const left = style.textAlign === 'left';
     const anchor = left ? 'start' : 'middle';
     const textX = left ? boxX + padX : centerX;
-    const startY = firstLineCenterY(boxY, boxH, lines.length, lineHeight);
+    const baseY = firstBaselineY(boxY, boxH, lines.length, lineHeight, style.fontSize);
     return (
-      <text
-        x={textX}
-        y={startY}
-        textAnchor={anchor}
-        dominantBaseline="central"
-        fontSize={style.fontSize}
-        fill={ink}
-        pointerEvents="none"
-      >
+      <text x={textX} y={baseY} textAnchor={anchor} fontSize={style.fontSize} fill={ink} pointerEvents="none">
         {lines.map((line, index) => (
           <tspan
             key={index}

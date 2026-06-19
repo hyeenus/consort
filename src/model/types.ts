@@ -52,9 +52,10 @@ export type PhaseId = string;
  * Where a phase edge sits relative to the box it is anchored to:
  * - 'gap': at the mid-point of the gap to the neighbouring box (with a small
  *   neat gap so adjacent phases meet around the connector arrow).
- * - 'border': exactly at the box's top/bottom border level.
+ * - 'box-top' / 'box-bottom': exactly at the box's top or bottom border level
+ *   (either edge can snap to either border).
  */
-export type PhaseEdgeMode = 'gap' | 'border';
+export type PhaseEdgeMode = 'gap' | 'box-top' | 'box-bottom';
 
 export interface PhaseBox {
   id: PhaseId;

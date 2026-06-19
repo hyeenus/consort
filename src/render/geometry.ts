@@ -126,13 +126,24 @@ function resolveExclusionSide(
   return 'right';
 }
 
+/** Distance from a line's alphabetic baseline up to its visual centre, in em. */
+export const BASELINE_RATIO = 0.32;
+
 /**
- * Vertical centre of the first line for a vertically-centred text block. Paired
- * with `dominant-baseline: central` on the text so the block is exactly centred.
+ * Alphabetic baseline Y of the first line for a vertically-centred text block.
+ * Uses explicit metrics (not dominant-baseline, which renders inconsistently
+ * and is poorly supported by some vector editors) so the block is truly centred
+ * on screen and in every export.
  */
-function firstLineCenterY(top: number, height: number, lineCount: number, lineHeight: number): number {
-  const block = lineHeight * Math.max(1, lineCount);
-  return top + height / 2 - block / 2 + lineHeight / 2;
+function firstBaselineY(
+  top: number,
+  height: number,
+  lineCount: number,
+  lineHeight: number,
+  fontSize: number
+): number {
+  const n = Math.max(1, lineCount);
+  return top + height / 2 - ((n - 1) * lineHeight) / 2 + fontSize * BASELINE_RATIO;
 }
 
 function branchSideOf(node: BoxNode): 'left' | 'right' | undefined {
@@ -358,12 +369,25 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
       if (si == null || ei == null) {
         return;
       }
-      const topMode = phase.topMode ?? 'gap';
-      const bottomMode = phase.bottomMode ?? 'gap';
+      // ('border' is the legacy value for box-top / box-bottom.)
+      const topMode = (phase.topMode as string | undefined) ?? 'gap';
+      const bottomMode = (phase.bottomMode as string | undefined) ?? 'gap';
       const topY =
-        topMode === 'border' || si === 0 ? tops[si] : (bottoms[si - 1] + tops[si]) / 2 + neatGap / 2;
+        topMode === 'box-bottom'
+          ? bottoms[si]
+          : topMode === 'box-top' || topMode === 'border'
+          ? tops[si]
+          : si === 0
+          ? tops[si]
+          : (bottoms[si - 1] + tops[si]) / 2 + neatGap / 2;
       const bottomY =
-        bottomMode === 'border' || ei === last ? bottoms[ei] : (bottoms[ei] + tops[ei + 1]) / 2 - neatGap / 2;
+        bottomMode === 'box-top'
+          ? tops[ei]
+          : bottomMode === 'box-bottom' || bottomMode === 'border'
+          ? bottoms[ei]
+          : ei === last
+          ? bottoms[ei]
+          : (bottoms[ei] + tops[ei + 1]) / 2 - neatGap / 2;
       const finalBottom = Math.max(bottomY, topY + 1);
       const textX = phaseRailX + railW / 2;
       const textY = (topY + finalBottom) / 2;
@@ -395,5 +419,5 @@ export function buildScene(graph: GraphState, settings: AppSettings): DiagramSce
   };
 }
 
-/** First-line centre helper exported for renderers. */
-export { firstLineCenterY };
+/** First-line baseline helper exported for renderers. */
+export { firstBaselineY };

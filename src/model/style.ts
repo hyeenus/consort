@@ -43,6 +43,8 @@ export interface DiagramStyle {
   fillColor: string;
   /** Target figure width in mm used to scale raster/vector exports. */
   figureWidthMm: number;
+  /** Optional phase-rail width override; falls back to a font-scaled default. */
+  phaseWidth?: number;
 }
 
 export const FONT_STACKS: Record<FontKey, string> = {
@@ -227,6 +229,7 @@ export function clampStyle(style: DiagramStyle): DiagramStyle {
     branchGap: clamp(style.branchGap, 16, 160),
     exclusionGap: clamp(style.exclusionGap, 16, 200),
     figureWidthMm: clamp(style.figureWidthMm, 40, 200),
+    phaseWidth: style.phaseWidth != null ? clamp(style.phaseWidth, 24, 160) : style.phaseWidth,
   };
 }
 

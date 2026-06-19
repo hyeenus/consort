@@ -3,8 +3,11 @@ import { DiagramStyle } from './style';
 /** Outer breathing room around the whole diagram in the export/canvas. */
 export const CANVAS_MARGIN = 96;
 
-/** Width of a rotated phase label rail, proportional to the font size. */
+/** Width of a rotated phase label rail (explicit override, else font-scaled). */
 export function phaseRailWidth(style: DiagramStyle): number {
+  if (style.phaseWidth != null && style.phaseWidth > 0) {
+    return style.phaseWidth;
+  }
   return Math.max(34, Math.round(style.fontSize * 2.4));
 }
 

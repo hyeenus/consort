@@ -301,7 +301,8 @@ button {
   touch-action: none;
 }
 
-.phase-handle:hover {
+.phase-handle:hover,
+.width-handle:hover {
   fill: var(--accent-strong);
 }
 

@@ -1,6 +1,6 @@
 import { AppSettings, GraphState } from '../model/types';
 import { fontStack, paddingXFor } from '../model/style';
-import { buildScene, firstLineCenterY, TextLine } from '../render/geometry';
+import { buildScene, firstBaselineY, BASELINE_RATIO, TextLine } from '../render/geometry';
 
 interface SvgOptions {
   /** Include a transparent background instead of white (default white). */
@@ -43,14 +43,15 @@ export function generateSvg(graph: GraphState, settings: AppSettings, options: S
   scene.phases.forEach((phase) => {
     parts.push(
       rect(phase.x, phase.y, phase.width, phase.height, radius, fill, ink, sw),
-      `<text x="${round(phase.textX)}" y="${round(phase.textY)}" transform="rotate(-90 ${round(phase.textX)} ${round(
+      `<text x="${round(phase.textX)}" y="${round(
+        phase.textY + style.fontSize * BASELINE_RATIO - ((phase.lines.length - 1) * lineHeight) / 2
+      )}" transform="rotate(-90 ${round(phase.textX)} ${round(
         phase.textY
-      )})" text-anchor="middle" dominant-baseline="central" font-size="${style.fontSize}" font-weight="700" fill="${escapeAttr(ink)}">`
+      )})" text-anchor="middle" font-size="${style.fontSize}" font-weight="700" fill="${escapeAttr(ink)}">`
     );
-    const startY = -((phase.lines.length - 1) * lineHeight) / 2;
     phase.lines.forEach((line, index) => {
       parts.push(
-        `<tspan x="${round(phase.textX)}" dy="${index === 0 ? round(startY) : lineHeight}">${escapeText(line)}</tspan>`
+        `<tspan x="${round(phase.textX)}" dy="${index === 0 ? 0 : lineHeight}">${escapeText(line)}</tspan>`
       );
     });
     parts.push('</text>');
@@ -119,9 +120,9 @@ export function generateSvg(graph: GraphState, settings: AppSettings, options: S
     const left = style.textAlign === 'left';
     const anchor = left ? 'start' : 'middle';
     const textX = left ? boxX + padX : centerX;
-    const startY = firstLineCenterY(boxY, boxH, lines.length, lineHeight);
+    const baseY = firstBaselineY(boxY, boxH, lines.length, lineHeight, style.fontSize);
     const segs: string[] = [
-      `<text x="${round(textX)}" y="${round(startY)}" text-anchor="${anchor}" dominant-baseline="central" font-size="${
+      `<text x="${round(textX)}" y="${round(baseY)}" text-anchor="${anchor}" font-size="${
         style.fontSize
       }" fill="${escapeAttr(ink)}">`,
     ];

@@ -9,6 +9,7 @@ import {
   IntervalId,
   NodeId,
   PhaseBox,
+  PhaseEdgeMode,
 } from './types';
 import { layoutTree, computeExclusionHeight, computeNodeHeight } from './layout';
 import { DiagramStyle, DEFAULT_STYLE } from './style';
@@ -354,7 +355,7 @@ export function setPhaseEdge(
   phaseId: string,
   edge: 'top' | 'bottom',
   nodeId: NodeId,
-  mode: 'gap' | 'border'
+  mode: PhaseEdgeMode
 ): GraphState {
   const cloned = cloneGraph(graph);
   const phase = getPhase(cloned, phaseId);

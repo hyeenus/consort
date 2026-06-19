@@ -75,6 +75,7 @@ interface AppStore {
     toggleArrow: (intervalId: IntervalId) => void;
     // Style + layout
     updateStyle: (patch: Partial<DiagramStyle>) => void;
+    setStyleLive: (patch: Partial<DiagramStyle>) => void;
     applyStylePreset: (id: string) => void;
     applyTemplate: (id: string) => void;
     nudgeNode: (nodeId: NodeId, delta: { x: number; y: number }) => void;
@@ -232,6 +233,13 @@ export const useAppStore = create<AppStore>()(
                   graph: recomputeGraph(state.graph, nextSettings),
                   history: pushHistory(state.history, prev),
                 };
+              });
+            },
+            setStyleLive: (patch) => {
+              set((state) => {
+                const nextStyle = clampStyle({ ...state.settings.style, ...patch, preset: 'custom' });
+                const nextSettings: AppSettings = { ...state.settings, style: nextStyle };
+                return { ...state, settings: nextSettings, graph: recomputeGraph(state.graph, nextSettings) };
               });
             },
             applyStylePreset: (id) => {
