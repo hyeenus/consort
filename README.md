@@ -6,10 +6,12 @@ emergency medicine, critical care, and anaesthesia (e.g. *SJTREM*, *Resuscitatio
 *BJA*), and produces clean, black-and-white, vector-quality figures that drop
 straight into a manuscript.
 
-This branch (`redesign-v2`) is a ground-up rebuild of the original V1 builder. It
-keeps the proven calculation engine (auto-balancing counts, branching, exclusions,
-Δ validation) and rebuilds everything you see and export around a single,
-style-driven rendering pipeline.
+**Live app: <https://consort.anssisaviluoto.com>**
+
+This is a version-2 rebuild of the original V1 builder. It keeps the proven
+calculation engine (auto-balancing counts, branching, exclusions, Δ validation)
+and rebuilds everything you see and export around a single, style-driven
+rendering pipeline so that the on-screen diagram and every export are identical.
 
 ## Why it looks the way it does
 
@@ -33,21 +35,23 @@ The defaults follow the conventions of highly-rated medical journals:
   width, spacing, exclusion offset, line weight, corner radius, number style and
   thousands separator, and target figure width. The diagram re-flows so it stays
   clean.
+- **Drag to fine-tune on the canvas** — drag a box to nudge its position; drag the
+  edge of a main box, exclusion box, or phase rail to resize its width; drag the
+  ends of a phase rail to resize it, snapping either to a main-flow box border
+  (top or bottom) or to the mid-point of the gap between boxes.
 - **Auto-balanced counts** — child and exclusion totals stay consistent; switch to
   *manual* or *free edit* to override, with a red Δ marking any mismatch (never
   exported).
 - **Branching** (two-arm symmetric split and multi-child bus bar), **exclusion
   boxes** with reason rows and an auto-generated remainder, and **phase labels** on
   the left rail.
-- **Hybrid layout** — auto-layout keeps everything tidy, but you can drag any box
-  to fine-tune its position and reset it at any time.
 - **Pan / zoom / fit**, undo / redo (100 steps), and local-storage autosave.
 - **Export** to SVG (true vector), PNG (300 / 600 / 1000 dpi, sized to your figure
   width), JPG, print, and JSON project files (save / open).
 
 ## Scripts
 
-- `npm run dev` – start the Vite dev server (served under `/consort/`)
+- `npm run dev` – start the Vite dev server
 - `npm run build` – produce a static production build in `dist/`
 - `npm run preview` – preview the production build locally
 - `npm run test` – run unit tests with Vitest
@@ -67,7 +71,7 @@ The defaults follow the conventions of highly-rated medical journals:
 src/
   model/        graph (calc engine), layout, style, templates, numbers, types
   render/       geometry — the single source of geometric truth
-  canvas/       interactive SVG canvas (pan/zoom, drag, selection)
+  canvas/       interactive SVG canvas (pan/zoom, drag, resize, selection)
   export/       svg + png/jpg renderers (share the render/ geometry)
   ui/           Toolbar, LeftPanel, Inspector, StyleControls, HelpModal
   state/        Zustand store (history, style, templates, persistence)
@@ -75,9 +79,18 @@ src/
 ```
 
 The on-screen canvas and the SVG/PNG exporters both build from
-`render/geometry.ts`, so **what you see is exactly what you publish**.
+`render/geometry.ts`, so **what you see is exactly what you publish**. Text is
+centred with explicit baseline metrics (not `dominant-baseline`) so it stays
+centred in every browser and vector editor.
 
-## Deployment (GitHub Pages)
+## Deployment (GitHub Pages, custom domain)
 
-`vite.config.ts` sets `base: '/consort/'`. Pushing to `main` builds the Vite bundle
-and deploys `dist/` to GitHub Pages at `https://hyeenus.github.io/consort/`.
+The site is served at the custom domain **consort.anssisaviluoto.com**:
+
+- `vite.config.ts` sets `base: '/'` (root-served custom domain).
+- `public/CNAME` pins the custom domain into the build output.
+- Pushing to `main` runs `.github/workflows/deploy.yml`, which tests, builds the
+  Vite bundle, and deploys `dist/` to GitHub Pages via the Actions Pages workflow.
+
+The GitHub Pages custom domain and HTTPS certificate are configured in the
+repository's Pages settings.
